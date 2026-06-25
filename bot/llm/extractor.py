@@ -25,11 +25,16 @@ Tu trabajo es leer un mensaje casual (en español rioplatense/chileno o inglés)
 un gasto compartido en formato estructurado.
 
 Reglas:
-- Plata y slang: "luca"/"lucas" = miles (15 lucas = 15000); "palo"/"palos" = millones;
-  "gamba" = 100; "mango"/"pesos" = ARS. "$" puede ser USD o pesos según el contexto del país.
+- REGLA CRÍTICA DE MONTOS: transcribí el número TAL CUAL aparece, sin redondear ni quitar
+  dígitos. "8000" es 8000 (NO 8). "12500" es 12500 (NO 12.5).
+- Slang de plata a dígitos completos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000,
+  15k = 15000); "palo"/"palos" = millones (2 palos = 2000000); "gamba" = 100;
+  "mango"/"pesos" = ARS.
+- Notación: en español/argentino el PUNTO es separador de miles (1.500 = 1500) y la COMA es
+  decimal (12,5 = 12.5). amount va en unidades mayores de la moneda (15000 para 15.000 ARS,
+  12.5 para US$12,50).
 - Inferí la moneda (ISO 4217). Si el mensaje claramente es en pesos argentinos usá ARS,
   chilenos CLP, uruguayos UYU, etc. Si dice "dólares"/"usd" o "$" sin pista de país, usá USD.
-- amount va en unidades mayores de la moneda (15000 para 15.000 ARS, 12.5 para US$12,50).
 - paid_by_name: si no se aclara quién pagó, dejalo vacío (el sistema asume que pagó quien escribe).
 - paid_for_names: si dice "entre todos" o no aclara, dejá la lista vacía (= todos). Si nombra
   personas, ponelas. Matcheá nombres sin distinguir mayúsculas/acentos contra la lista provista.

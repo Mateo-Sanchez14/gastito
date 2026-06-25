@@ -1,0 +1,17 @@
+# secrets & local data
+.env
+.env.production
+.env.*.local
+postgres-data/
+gowa/storages/*
+!gowa/storages/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# node / next (web is vendored; keep source, ignore build artifacts)
+web/node_modules/
+web/.next/
+web/postgres-data/

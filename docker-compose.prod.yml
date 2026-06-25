@@ -1,0 +1,79 @@
+name: gastito
+
+# Production stack for the msanchez.me droplet.
+# - Postgres comes from the shared `shared-postgres` container (provisioned by
+#   the deployment-server). DATABASE_URL is set in .env.production to the
+#   per-project DSN it returned.
+# - Web + Gowa join the external `caddy_net` and declare their hostname via
+#   labels (caddy-docker-proxy). The bot stays internal-only.
+# Deploy: docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+
+services:
+  web:
+    build: ./web
+    restart: unless-stopped
+    environment:
+      # spliit/Prisma — both point at the shared-postgres per-project DSN.
+      POSTGRES_PRISMA_URL: ${DATABASE_URL}
+      POSTGRES_URL_NON_POOLING: ${DATABASE_URL}
+      NEXT_PUBLIC_DEFAULT_CURRENCY_CODE: ${NEXT_PUBLIC_DEFAULT_CURRENCY_CODE:-USD}
+      BOT_INGEST_SECRET: ${BOT_INGEST_SECRET}
+    labels:
+      caddy: ${WEB_HOST}
+      caddy.reverse_proxy: '{{upstreams 3000}}'
+    networks:
+      - internal
+      - caddy_net
+
+  gowa:
+    image: aldinokemal2104/go-whatsapp-web-multidevice:${GOWA_IMAGE_TAG:-latest}
+    command: ['rest']
+    restart: unless-stopped
+    environment:
+      APP_PORT: '4000'
+      APP_HOST: 0.0.0.0
+      APP_BASIC_AUTH: ${GOWA_BASIC_AUTH_USER}:${GOWA_BASIC_AUTH_PASS}
+      APP_DEBUG: 'false'
+      DB_URI: 'file:storages/whatsapp.db?_foreign_keys=on'
+      WHATSAPP_CHAT_STORAGE: 'true'
+      WHATSAPP_AUTO_REPLY: ''
+      WHATSAPP_AUTO_MARK_READ: 'false'
+      WHATSAPP_WEBHOOK: 'http://bot:8000/webhooks/gowa/'
+      WHATSAPP_WEBHOOK_SECRET: ${GOWA_WEBHOOK_SECRET}
+      WHATSAPP_WEBHOOK_EVENTS: 'message'
+      WHATSAPP_WEBHOOK_INCLUDE_OUTGOING: 'false'
+    volumes:
+      - ./gowa/storages:/app/storages
+    labels:
+      # Gowa pairing UI (scan QR here once). Protected by its own Basic Auth.
+      caddy: ${GOWA_HOST}
+      caddy.reverse_proxy: '{{upstreams 4000}}'
+    networks:
+      - internal
+      - caddy_net
+
+  bot:
+    build: ./bot
+    restart: unless-stopped
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.7}
+      WEB_INGEST_URL: 'http://web:3000/api/bot'
+      BOT_INGEST_SECRET: ${BOT_INGEST_SECRET}
+      GOWA_BASE_URL: 'http://gowa:4000'
+      GOWA_BASIC_AUTH_USER: ${GOWA_BASIC_AUTH_USER}
+      GOWA_BASIC_AUTH_PASS: ${GOWA_BASIC_AUTH_PASS}
+      GOWA_WEBHOOK_SECRET: ${GOWA_WEBHOOK_SECRET}
+      DOLARAPI_URL: ${DOLARAPI_URL:-https://dolarapi.com}
+      FX_GENERAL_URL: ${FX_GENERAL_URL:-https://open.er-api.com}
+    depends_on:
+      - web
+      - gowa
+    networks:
+      - internal
+
+networks:
+  internal:
+  caddy_net:
+    external: true

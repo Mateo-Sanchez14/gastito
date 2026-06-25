@@ -1,0 +1,89 @@
+# gastito — full stack: Postgres + spliit web + Gowa + WhatsApp bot.
+# Copy .env.example to .env and fill in the secrets before `docker compose up`.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [gastito]
+
+  web:
+    build: ./web
+    image: gastito-web:latest
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      # Prisma reads these; the container entrypoint runs `prisma migrate deploy`.
+      POSTGRES_PRISMA_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_URL_NON_POOLING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      NEXT_PUBLIC_DEFAULT_CURRENCY_CODE: ${NEXT_PUBLIC_DEFAULT_CURRENCY_CODE:-USD}
+      # gastito: shared secret guarding /api/bot/* (must match the bot).
+      BOT_INGEST_SECRET: ${BOT_INGEST_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [gastito]
+
+  gowa:
+    image: aldinokemal2104/go-whatsapp-web-multidevice:${GOWA_IMAGE_TAG:-latest}
+    command: ['rest']
+    restart: unless-stopped
+    ports:
+      - '4000:4000'
+    environment:
+      APP_PORT: '4000'
+      APP_HOST: 0.0.0.0
+      APP_BASIC_AUTH: ${GOWA_BASIC_AUTH_USER}:${GOWA_BASIC_AUTH_PASS}
+      APP_DEBUG: 'false'
+      DB_URI: 'file:storages/whatsapp.db?_foreign_keys=on'
+      WHATSAPP_CHAT_STORAGE: 'true'
+      WHATSAPP_AUTO_REPLY: ''
+      WHATSAPP_AUTO_MARK_READ: 'false'
+      # Inbound messages are POSTed to the bot, signed with the shared secret.
+      WHATSAPP_WEBHOOK: 'http://bot:8000/webhooks/gowa/'
+      WHATSAPP_WEBHOOK_SECRET: ${GOWA_WEBHOOK_SECRET}
+      WHATSAPP_WEBHOOK_EVENTS: 'message'
+      # Don't fire webhooks for our own outgoing messages -> no reply loop.
+      WHATSAPP_WEBHOOK_INCLUDE_OUTGOING: 'false'
+    volumes:
+      - ./gowa/storages:/app/storages
+    networks: [gastito]
+
+  bot:
+    build: ./bot
+    image: gastito-bot:latest
+    restart: unless-stopped
+    ports:
+      - '8000:8000'
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
+      CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.7}
+      WEB_INGEST_URL: 'http://web:3000/api/bot'
+      BOT_INGEST_SECRET: ${BOT_INGEST_SECRET}
+      GOWA_BASE_URL: 'http://gowa:4000'
+      GOWA_BASIC_AUTH_USER: ${GOWA_BASIC_AUTH_USER}
+      GOWA_BASIC_AUTH_PASS: ${GOWA_BASIC_AUTH_PASS}
+      GOWA_WEBHOOK_SECRET: ${GOWA_WEBHOOK_SECRET}
+      DOLARAPI_URL: ${DOLARAPI_URL:-https://dolarapi.com}
+      FX_GENERAL_URL: ${FX_GENERAL_URL:-https://open.er-api.com}
+    depends_on:
+      - web
+      - gowa
+    networks: [gastito]
+
+networks:
+  gastito:
+    driver: bridge

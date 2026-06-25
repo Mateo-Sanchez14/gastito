@@ -1,0 +1,74 @@
+# gastito 🧾
+
+Gastos compartidos entre amigos, cargados por **mensajes de WhatsApp en lenguaje
+natural**, con tracking multi-moneda en USD.
+
+Mandás al grupo de WhatsApp algo como _"pagué 15 lucas de birra anoche, dividido
+entre todos"_ y el bot lo interpreta, convierte ARS→USD según la cotización
+elegida, y carga el gasto. Después ves todo (gastos, saldos, quién le debe a
+quién) en la web.
+
+## Arquitectura
+
+```
+WhatsApp grupo
+     │  (mensajes)
+     ▼
+   Gowa  ──webhook (HMAC)──▶  bot (FastAPI + Claude + FX)
+   ▲                              │
+   └────── responde ◀────────────┤ POST /api/bot/* (bearer)
+                                  ▼
+                              web (spliit)  ──▶  Postgres
+```
+
+- **`web/`** — [spliit](https://github.com/spliit-app/spliit) vendorizado (Next.js
+  + Prisma + tRPC): UI, saldos, splits, multi-moneda. Le agregamos endpoints
+  `/api/bot/*` para que el bot cargue/consulte gastos. Ver [VENDORED.md](VENDORED.md).
+- **`bot/`** — servicio Python que recibe los mensajes de Gowa, los parsea con
+  Claude (`claude-opus-4-8`), convierte la moneda y llama a la web.
+- **`gowa`** — [go-whatsapp-web-multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice),
+  transporte (no oficial) de WhatsApp.
+- **`postgres`** — base de datos.
+
+## Cómo correrlo
+
+1. `cp .env.example .env` y completá los secretos (sobre todo `ANTHROPIC_API_KEY`;
+   `BOT_INGEST_SECRET` y `GOWA_WEBHOOK_SECRET` pueden ser cualquier string fuerte).
+2. `docker compose up --build`
+3. **Parear WhatsApp:** abrí http://localhost:4000 (user/pass = `GOWA_BASIC_AUTH_*`),
+   escaneá el QR con el WhatsApp del bot (idealmente un número dedicado).
+4. **Crear el grupo en la web:** abrí http://localhost:3000, creá un grupo (ej.
+   "Asado") con sus participantes, moneda **USD**. Copiá el id del grupo de la URL.
+5. **Vincular el grupo de WhatsApp** al grupo de spliit (una vez). Necesitás el
+   `chatId` del grupo de WhatsApp (`...@g.us`) — mandá cualquier mensaje al grupo
+   y miralo en los logs del bot (`docker compose logs -f bot`), después:
+   ```bash
+   curl -X POST http://localhost:3000/api/bot/link \
+     -H "Authorization: Bearer $BOT_INGEST_SECRET" \
+     -H "Content-Type: application/json" \
+     -d '{"chatId":"<...@g.us>","groupId":"<group-id>","fxArsSource":"blue"}'
+   ```
+6. **Presentarse:** cada integrante manda en el grupo `/soy <su nombre>` (el mismo
+   nombre que el participante en la web).
+7. ¡Listo! Mandá _"pagué 15 lucas de birra, entre todos"_ y miralo aparecer en la web.
+
+## Comandos del bot
+
+| Comando | Qué hace |
+|---|---|
+| `/soy <nombre>` | Vincula tu WhatsApp a tu participante del grupo |
+| `saldo` | Muestra quién le debe a quién |
+| `deshacer` | Borra tu último gasto |
+| `/cotizacion oficial\|blue\|mep` | Elige qué dólar usar para convertir ARS |
+| `ayuda` | Ayuda |
+
+## Notas
+
+- **Cotización ARS:** configurable por grupo (oficial/blue/mep vía dolarapi.com).
+  Cada confirmación muestra la cotización usada. Oficial vs blue puede ~duplicar
+  el valor — acordalo en el grupo.
+- **Gowa es no oficial** (riesgo de ban de WhatsApp). Usá un número dedicado.
+- **Sin auth fuerte:** quien esté en el grupo de WhatsApp (o conozca la URL de
+  spliit) puede cargar gastos. Pensado para un grupo de amigos de confianza.
+- La base puede ser Supabase u otro Postgres: sólo cambiá el connection string en
+  `docker-compose.yml` (`POSTGRES_PRISMA_URL` / `POSTGRES_URL_NON_POOLING`).

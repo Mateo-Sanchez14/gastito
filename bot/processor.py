@@ -7,6 +7,7 @@ Runs in a background task (sync httpx is fine there).
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 
 from commands import detect_command, handle_command
@@ -51,6 +52,11 @@ def _process(payload: dict) -> None:
     text = (msg.text or "").strip()
     if not text:
         return
+
+    # Small human-cadence pause before acting: show "typing…" then wait briefly.
+    if settings.reply_delay_seconds > 0:
+        gowa.send_chat_presence(msg.chat_id, "start")
+        time.sleep(settings.reply_delay_seconds)
 
     # Resolve the sender -> participant (needed for /undo and default payer).
     members = web.get_members(msg.chat_id)

@@ -28,6 +28,9 @@ class Settings:
     gemini_model: str
     confidence_threshold: float
 
+    # Small human-cadence pause before the bot acts/replies (seconds).
+    reply_delay_seconds: float
+
     # FX
     dolarapi_url: str
     fx_general_url: str
@@ -52,6 +55,7 @@ def load_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         confidence_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),
+        reply_delay_seconds=float(os.getenv("BOT_REPLY_DELAY_SECONDS", "2")),
         dolarapi_url=os.getenv("DOLARAPI_URL", "https://dolarapi.com").rstrip("/"),
         fx_general_url=os.getenv("FX_GENERAL_URL", "https://open.er-api.com").rstrip("/"),
         port=int(os.getenv("BOT_PORT", "8000")),

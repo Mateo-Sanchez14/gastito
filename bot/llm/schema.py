@@ -26,55 +26,20 @@ class ExpenseExtraction(BaseModel):
     clarification_needed: Optional[str] = None
 
 
-# JSON schema for the Anthropic tool (hand-written to keep the tool input tight
-# and version-independent of pydantic's schema generation).
-EXTRACTION_TOOL = {
-    "name": "record_expense",
-    "description": (
-        "Record the structured interpretation of a casual WhatsApp message about "
-        "a shared expense, or classify it as a command/chitchat."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "message_type": {
-                "type": "string",
-                "enum": ["expense", "command", "chitchat"],
-                "description": "expense=logs money spent; command=bot command; chitchat=neither",
-            },
-            "title": {"type": "string", "description": "Short human title, e.g. 'birra', 'Uber'"},
-            "amount": {
-                "type": "number",
-                "description": "Amount in the currency's major units (15000 for 15.000 ARS, 12.5 for $12.50)",
-            },
-            "currency": {
-                "type": "string",
-                "description": "ISO 4217 code. Infer from context/slang; default USD if a bare '$' with no country cue.",
-            },
-            "paid_by_name": {
-                "type": "string",
-                "description": "Name of who paid. If unstated, leave empty (defaults to the sender).",
-            },
-            "split_mode": {
-                "type": "string",
-                "enum": ["EVENLY", "BY_SHARES", "BY_PERCENTAGE", "BY_AMOUNT"],
-            },
-            "paid_for_names": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Names the expense is split among. Empty list means everyone in the group.",
-            },
-            "category": {"type": "string"},
-            "date": {"type": "string", "description": "ISO date YYYY-MM-DD; default to today"},
-            "confidence": {
-                "type": "number",
-                "description": "0..1 confidence that this is a complete, unambiguous expense",
-            },
-            "clarification_needed": {
-                "type": "string",
-                "description": "If something essential is ambiguous/missing, the question to ask the group.",
-            },
-        },
-        "required": ["message_type", "confidence"],
-    },
-}
+# Instruction appended to the system prompt so both providers (GitHub Models in
+# JSON mode, Gemini with responseMimeType application/json) emit exactly these
+# keys. Parsed and validated into ExpenseExtraction.
+JSON_INSTRUCTION = """\
+Respondé ÚNICAMENTE con un objeto JSON (sin texto alrededor, sin markdown) con estas claves:
+- message_type: "expense" | "command" | "chitchat"
+- title: string (título corto, ej. "birra", "Uber")
+- amount: number (unidades mayores: 15000 para 15.000 ARS, 12.5 para US$12,50)
+- currency: string (ISO 4217, ej. ARS, USD, CLP)
+- paid_by_name: string (quién pagó; "" si no se aclara)
+- split_mode: "EVENLY" | "BY_SHARES" | "BY_PERCENTAGE" | "BY_AMOUNT"
+- paid_for_names: array de strings (vacío = todos)
+- category: string
+- date: string (YYYY-MM-DD)
+- confidence: number (0..1)
+- clarification_needed: string (la pregunta a hacer si algo esencial es ambiguo; "" si no)
+"""

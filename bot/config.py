@@ -19,9 +19,13 @@ class Settings:
     web_ingest_url: str
     bot_ingest_secret: str
 
-    # Anthropic (natural-language extraction)
-    anthropic_api_key: str
-    anthropic_model: str
+    # LLM (natural-language extraction). GitHub Models (OpenAI-compatible) is the
+    # primary; Gemini is the fallback. Both keys are reused from reserv-ia.
+    github_models_token: str
+    github_models_base_url: str
+    github_models_model: str
+    gemini_api_key: str
+    gemini_model: str
     confidence_threshold: float
 
     # FX
@@ -40,8 +44,13 @@ def load_settings() -> Settings:
         gowa_webhook_secret=os.getenv("GOWA_WEBHOOK_SECRET", ""),
         web_ingest_url=os.getenv("WEB_INGEST_URL", "http://web:3000/api/bot").rstrip("/"),
         bot_ingest_secret=os.getenv("BOT_INGEST_SECRET", ""),
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8"),
+        github_models_token=os.getenv("GITHUB_MODELS_TOKEN", ""),
+        github_models_base_url=os.getenv(
+            "GITHUB_MODELS_BASE_URL", "https://models.github.ai/inference"
+        ).rstrip("/"),
+        github_models_model=os.getenv("GITHUB_MODELS_MODEL", "openai/gpt-4o-mini"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         confidence_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),
         dolarapi_url=os.getenv("DOLARAPI_URL", "https://dolarapi.com").rstrip("/"),
         fx_general_url=os.getenv("FX_GENERAL_URL", "https://open.er-api.com").rstrip("/"),

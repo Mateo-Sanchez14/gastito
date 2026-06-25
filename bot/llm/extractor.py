@@ -1,34 +1,28 @@
-"""Natural-language -> structured expense via the Anthropic API.
+"""Natural-language -> structured expense.
 
-Uses forced tool-use (``record_expense``) so the model must return JSON matching
-our schema, with no brittle text parsing.
+Primary provider: GitHub Models (OpenAI-compatible chat completions, JSON mode).
+Fallback provider: Gemini (generateContent, responseMimeType application/json).
+
+Both keys are reused from the reserv-ia deployment. We use plain httpx + JSON
+mode (rather than provider SDKs) to keep deps light and the two paths uniform.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 
-import anthropic
+import httpx
 
 from config import settings
-from llm.schema import EXTRACTION_TOOL, ExpenseExtraction
+from llm.schema import JSON_INSTRUCTION, ExpenseExtraction
 
 logger = logging.getLogger(__name__)
-
-_client: anthropic.Anthropic | None = None
-
-
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    return _client
-
 
 SYSTEM_PROMPT = """\
 Sos el asistente de un grupo de amigos que registran gastos compartidos por WhatsApp.
 Tu trabajo es leer un mensaje casual (en español rioplatense/chileno o inglés) y extraer
-un gasto compartido en formato estructurado, llamando SIEMPRE a la herramienta record_expense.
+un gasto compartido en formato estructurado.
 
 Reglas:
 - Plata y slang: "luca"/"lucas" = miles (15 lucas = 15000); "palo"/"palos" = millones;
@@ -68,6 +62,51 @@ def _build_user_prompt(
     )
 
 
+def _call_github_models(system: str, user: str) -> dict:
+    """Primary: GitHub Models, OpenAI-compatible chat completions in JSON mode."""
+    if not settings.github_models_token:
+        raise RuntimeError("GITHUB_MODELS_TOKEN not configured")
+    resp = httpx.post(
+        f"{settings.github_models_base_url}/chat/completions",
+        headers={"Authorization": f"Bearer {settings.github_models_token}"},
+        json={
+            "model": settings.github_models_model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    content = resp.json()["choices"][0]["message"]["content"]
+    return json.loads(content)
+
+
+def _call_gemini(system: str, user: str) -> dict:
+    """Fallback: Gemini generateContent with JSON response."""
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY not configured")
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}"
+    )
+    resp = httpx.post(
+        url,
+        json={
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    return json.loads(text)
+
+
 def extract(
     text: str,
     sender_name: str,
@@ -76,40 +115,21 @@ def extract(
     categories: list[str],
     today: str,
 ) -> ExpenseExtraction | None:
-    """Return a parsed extraction, or None on API/parse failure."""
-    try:
-        resp = _get_client().messages.create(
-            model=settings.anthropic_model,
-            max_tokens=1024,
-            system=[
-                {
-                    "type": "text",
-                    "text": SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            tools=[EXTRACTION_TOOL],
-            tool_choice={"type": "tool", "name": "record_expense"},
-            messages=[
-                {
-                    "role": "user",
-                    "content": _build_user_prompt(
-                        text, sender_name, participants, currencies, categories, today
-                    ),
-                }
-            ],
-        )
-    except Exception:
-        logger.exception("Anthropic extraction call failed")
-        return None
+    """Return a parsed extraction, trying GitHub Models then Gemini."""
+    system = f"{SYSTEM_PROMPT}\n\n{JSON_INSTRUCTION}"
+    user = _build_user_prompt(text, sender_name, participants, currencies, categories, today)
 
-    for block in resp.content:
-        if getattr(block, "type", None) == "tool_use":
-            try:
-                return ExpenseExtraction(**block.input)
-            except Exception:
-                logger.exception("Failed to validate extraction: %s", block.input)
-                return None
+    for name, provider in (("github_models", _call_github_models), ("gemini", _call_gemini)):
+        try:
+            data = provider(system, user)
+        except Exception as e:
+            logger.warning("LLM provider %s failed: %s", name, e)
+            continue
+        try:
+            return ExpenseExtraction(**data)
+        except Exception:
+            logger.exception("LLM provider %s returned unparseable data: %s", name, data)
+            continue
 
-    logger.warning("Anthropic response had no tool_use block")
+    logger.error("All LLM providers failed for message: %s", text[:200])
     return None

@@ -25,15 +25,17 @@ WhatsApp grupo
   + Prisma + tRPC): UI, saldos, splits, multi-moneda. Le agregamos endpoints
   `/api/bot/*` para que el bot cargue/consulte gastos. Ver [VENDORED.md](VENDORED.md).
 - **`bot/`** — servicio Python que recibe los mensajes de Gowa, los parsea con
-  Claude (`claude-opus-4-8`), convierte la moneda y llama a la web.
+  un LLM (GitHub Models `openai/gpt-4o-mini` como primario, Gemini de fallback),
+  convierte la moneda y llama a la web.
 - **`gowa`** — [go-whatsapp-web-multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice),
   transporte (no oficial) de WhatsApp.
 - **`postgres`** — base de datos.
 
 ## Cómo correrlo
 
-1. `cp .env.example .env` y completá los secretos (sobre todo `ANTHROPIC_API_KEY`;
-   `BOT_INGEST_SECRET` y `GOWA_WEBHOOK_SECRET` pueden ser cualquier string fuerte).
+1. `cp .env.example .env` y completá los secretos (`GITHUB_MODELS_TOKEN` y
+   opcionalmente `GEMINI_API_KEY` para el parseo; `BOT_INGEST_SECRET` y
+   `GOWA_WEBHOOK_SECRET` pueden ser cualquier string fuerte).
 2. `docker compose up --build`
 3. **Parear WhatsApp:** abrí http://localhost:4000 (user/pass = `GOWA_BASIC_AUTH_*`),
    escaneá el QR con el WhatsApp del bot (idealmente un número dedicado).

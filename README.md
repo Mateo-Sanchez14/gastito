@@ -64,6 +64,23 @@ WhatsApp grupo
 | `/cotizacion oficial\|blue\|mep` | Elige qué dólar usar para convertir ARS |
 | `ayuda` | Ayuda |
 
+## Deploy
+
+Corre en el droplet `root@msanchez.me`, integrado al deployment-server: en
+`/srv/gastito`, sobre `shared-postgres` y el Caddy compartido (`caddy_net`).
+Subdominios: `gastito.msanchez.me` (web) y `gastito-wa.msanchez.me` (pareo Gowa).
+
+**Auto-deploy:** push/merge a `main` dispara un webhook firmado a
+`https://deploy.msanchez.me/webhooks/github/gastito`, que hace `git fetch/reset`
++ `docker compose -f docker-compose.prod.yml --env-file .env.production build &&
+up -d`. (Reconstruye en el droplet de 1GB, ~9 min, usa swap.)
+
+**Deploy manual (si hace falta):**
+```
+ssh root@msanchez.me 'cd /srv/gastito && git pull && \
+  docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build'
+```
+
 ## Notas
 
 - **Cotización ARS:** configurable por grupo (oficial/blue/mep vía dolarapi.com).

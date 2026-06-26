@@ -31,6 +31,10 @@ services:
       NEXT_PUBLIC_DEFAULT_CURRENCY_CODE: ${NEXT_PUBLIC_DEFAULT_CURRENCY_CODE:-USD}
       # gastito: shared secret guarding /api/bot/* (must match the bot).
       BOT_INGEST_SECRET: ${BOT_INGEST_SECRET}
+      # gastito: shared user/pass that gates the web UI (Basic Auth). Leave
+      # unset for an open local dev; set both to turn the gate on.
+      WEB_BASIC_AUTH_USER: ${WEB_BASIC_AUTH_USER:-}
+      WEB_BASIC_AUTH_PASS: ${WEB_BASIC_AUTH_PASS:-}
     depends_on:
       postgres:
         condition: service_healthy

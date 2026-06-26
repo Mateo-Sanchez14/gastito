@@ -60,6 +60,7 @@ WhatsApp grupo
 |---|---|
 | `/soy <nombre>` | Vincula tu WhatsApp a tu participante del grupo |
 | `saldo` | Muestra quién le debe a quién |
+| `resumen` | Cuánto puso y cuánto gastó cada uno (+ saldo neto) |
 | `deshacer` | Borra tu último gasto |
 | `/cotizacion oficial\|blue\|mep` | Elige qué dólar usar para convertir ARS |
 | `ayuda` | Ayuda |
@@ -100,7 +101,15 @@ ssh root@msanchez.me 'cd /srv/gastito && git pull && \
   Cada confirmación muestra la cotización usada. Oficial vs blue puede ~duplicar
   el valor — acordalo en el grupo.
 - **Gowa es no oficial** (riesgo de ban de WhatsApp). Usá un número dedicado.
-- **Sin auth fuerte:** quien esté en el grupo de WhatsApp (o conozca la URL de
-  spliit) puede cargar gastos. Pensado para un grupo de amigos de confianza.
+- **Login de la web:** la UI está detrás de un usuario/contraseña compartido
+  (Basic Auth), uno solo para todo el grupo. Se setea con `WEB_BASIC_AUTH_USER`
+  y `WEB_BASIC_AUTH_PASS`; si los dejás vacíos no pide login (útil en local). El
+  navegador lo pide una vez y lo recuerda. Para cambiar la clave editás el env y
+  recreás el contenedor (`docker compose ... up -d web`) — se lee en runtime, no
+  hace falta rebuild. Los endpoints del bot (`/api/bot/*`) y los health checks
+  quedan exentos (tienen su propia auth).
+- **Auth liviana, no fuerte:** cualquiera con el login de la web —o que esté en
+  el grupo de WhatsApp— puede cargar gastos. Pensado para un grupo de amigos de
+  confianza, no para datos sensibles.
 - La base puede ser Supabase u otro Postgres: sólo cambiá el connection string en
   `docker-compose.yml` (`POSTGRES_PRISMA_URL` / `POSTGRES_URL_NON_POOLING`).

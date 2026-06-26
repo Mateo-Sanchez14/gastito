@@ -22,6 +22,7 @@ HELP_TEXT = (
     "ej. _\"eran 8000 no 800\"_ o _\"dividí entre todos menos Pichi\"_\n"
     "• `/soy <tu nombre>` — vinculá tu WhatsApp a tu nombre del grupo\n"
     "• `saldo` — ver quién le debe a quién\n"
+    "• `resumen` — ver cuánto puso y cuánto gastó cada uno\n"
     "• `deshacer` — borrar tu último gasto\n"
     "• `/cotizacion oficial|blue|mep` — fijar qué dólar usar para ARS\n"
     "• `ayuda` — este mensaje"
@@ -35,6 +36,8 @@ def detect_command(text: str) -> str | None:
         return "soy"
     if t in ("saldo", "saldos", "balance", "balances"):
         return "saldo"
+    if t in ("resumen", "resúmen", "gastos", "total", "totales", "/resumen", "/gastos"):
+        return "resumen"
     if t in ("deshacer", "undo", "/deshacer", "/undo"):
         return "undo"
     if t.startswith(("/cotizacion", "/cotización", "cotizacion", "cotización")):
@@ -82,6 +85,9 @@ def handle_command(
     if command == "saldo":
         return _format_balances(web.get_balances(group_id))
 
+    if command == "resumen":
+        return _format_summary(web.get_balances(group_id))
+
     if command == "undo":
         if not sender_participant_id:
             return "Primero decime quién sos con `/soy <tu nombre>`."
@@ -101,4 +107,39 @@ def _format_balances(data: dict) -> str:
     lines = ["💰 *Saldos:*"]
     for r in reimbursements:
         lines.append(f"• {r['fromName']} le debe {format_money(r['amount'])} a {r['toName']}")
+    return "\n".join(lines)
+
+
+def _format_summary(data: dict) -> str:
+    """Per-person breakdown: what each one put in (paid), their share of the
+    spending (paidFor), and the resulting net balance.
+
+    `balances` come from the web's /balances endpoint, in group-currency cents:
+    `paid` = money they fronted, `paidFor` = their share of all expenses,
+    `total` = paid - paidFor (positive = they're owed, negative = they owe).
+    """
+    balances = data.get("balances", [])
+    if not balances:
+        return "Todavía no hay gastos cargados. Contá uno y lo registro 📝"
+
+    total_spent = sum(b.get("paid", 0) for b in balances)
+    rows = sorted(balances, key=lambda b: b.get("paid", 0), reverse=True)
+
+    lines = [
+        "📊 *Resumen del grupo*",
+        f"Gastado en total: {format_money(total_spent)}",
+        "",
+    ]
+    for b in rows:
+        net = b.get("total", 0)
+        if net > 0:
+            net_txt = f"le deben {format_money(net)}"
+        elif net < 0:
+            net_txt = f"debe {format_money(-net)}"
+        else:
+            net_txt = "a mano"
+        lines.append(
+            f"• *{b['name']}*: puso {format_money(b.get('paid', 0))} · "
+            f"le toca {format_money(b.get('paidFor', 0))} → {net_txt}"
+        )
     return "\n".join(lines)

@@ -67,6 +67,56 @@ def _build_user_prompt(
     )
 
 
+EDIT_SYSTEM_PROMPT = """\
+Sos el asistente de un grupo de amigos que registran gastos compartidos por WhatsApp.
+El usuario está RESPONDIENDO (citando) un gasto ya registrado para CORREGIRLO.
+Te doy el gasto actual y el mensaje de corrección; devolvé el gasto YA CORREGIDO COMPLETO.
+
+Reglas:
+- Devolvé SIEMPRE el gasto completo: copiá TAL CUAL los campos que el mensaje NO cambia
+  (título, monto, moneda, quién pagó, entre quiénes) y modificá solo lo que el usuario corrige.
+- REGLA CRÍTICA DE MONTOS: transcribí el número TAL CUAL aparece, sin redondear ni quitar
+  dígitos. "8000" es 8000 (NO 8). amount va en unidades mayores de la moneda.
+- Slang de plata a dígitos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000); "palo"/"palos"
+  = millones; "gamba" = 100; "mango"/"pesos" = ARS. PUNTO = miles (1.500=1500), COMA = decimal.
+- paid_for_names: si el usuario cambia entre quiénes se divide ("dividí entre todos menos X",
+  "solo entre A y B"), calculá la NUEVA lista completa de nombres a partir de los participantes.
+  Si no toca la división, copiá la lista actual. Lista vacía = todos.
+- paid_by_name: si cambia quién pagó, ponelo; si no, copiá el actual.
+- message_type: "expense" SOLO si el mensaje realmente corrige/cambia el gasto. Si es un
+  comentario, emoji, agradecimiento o charla que NO cambia nada, devolvé "chitchat".
+- confidence: 0..1. Bajala si la corrección es ambigua y completá clarification_needed con una
+  pregunta corta en el idioma del mensaje.
+"""
+
+
+def _build_edit_prompt(
+    current: dict,
+    text: str,
+    sender_name: str,
+    participants: list[str],
+    currencies: list[str],
+    categories: list[str],
+    today: str,
+) -> str:
+    split = ", ".join(current.get("paid_for_names") or []) or "todos"
+    return (
+        f"Fecha de hoy: {today}\n"
+        f"Quien escribe: {sender_name or 'desconocido'}\n"
+        f"Participantes del grupo: {', '.join(participants) or '(ninguno)'}\n"
+        f"Monedas soportadas: {', '.join(currencies)}\n"
+        f"Categorías disponibles: {', '.join(categories) or '(ninguna)'}\n\n"
+        "Gasto ACTUAL (a corregir):\n"
+        f"- título: {current.get('title') or 'Gasto'}\n"
+        f"- monto: {current.get('amount')} {current.get('currency') or 'USD'}\n"
+        f"- pagó: {current.get('paid_by_name') or 'desconocido'}\n"
+        f"- dividido entre: {split}\n"
+        f"- categoría: {current.get('category') or '(ninguna)'}\n"
+        f"- fecha: {current.get('date') or today}\n\n"
+        f"Mensaje de corrección:\n{text}"
+    )
+
+
 def _call_github_models(system: str, user: str) -> dict:
     """Primary: GitHub Models, OpenAI-compatible chat completions in JSON mode."""
     if not settings.github_models_token:
@@ -112,18 +162,8 @@ def _call_gemini(system: str, user: str) -> dict:
     return json.loads(text)
 
 
-def extract(
-    text: str,
-    sender_name: str,
-    participants: list[str],
-    currencies: list[str],
-    categories: list[str],
-    today: str,
-) -> ExpenseExtraction | None:
-    """Return a parsed extraction, trying GitHub Models then Gemini."""
-    system = f"{SYSTEM_PROMPT}\n\n{JSON_INSTRUCTION}"
-    user = _build_user_prompt(text, sender_name, participants, currencies, categories, today)
-
+def _run(system: str, user: str, what: str) -> ExpenseExtraction | None:
+    """Run the prompt through GitHub Models then Gemini; parse to ExpenseExtraction."""
     for name, provider in (("github_models", _call_github_models), ("gemini", _call_gemini)):
         try:
             data = provider(system, user)
@@ -136,5 +176,41 @@ def extract(
             logger.exception("LLM provider %s returned unparseable data: %s", name, data)
             continue
 
-    logger.error("All LLM providers failed for message: %s", text[:200])
+    logger.error("All LLM providers failed for %s: %s", what, user[:200])
     return None
+
+
+def extract(
+    text: str,
+    sender_name: str,
+    participants: list[str],
+    currencies: list[str],
+    categories: list[str],
+    today: str,
+) -> ExpenseExtraction | None:
+    """Return a parsed extraction, trying GitHub Models then Gemini."""
+    system = f"{SYSTEM_PROMPT}\n\n{JSON_INSTRUCTION}"
+    user = _build_user_prompt(text, sender_name, participants, currencies, categories, today)
+    return _run(system, user, "extract")
+
+
+def extract_edit(
+    current: dict,
+    text: str,
+    sender_name: str,
+    participants: list[str],
+    currencies: list[str],
+    categories: list[str],
+    today: str,
+) -> ExpenseExtraction | None:
+    """Re-extract a *full* expense given the current state + a correction.
+
+    ``current`` describes the expense being edited (title, amount in its original
+    currency, currency, payer, who it's split among). The model returns the FULL
+    corrected expense, copying fields the message doesn't change.
+    """
+    system = f"{EDIT_SYSTEM_PROMPT}\n\n{JSON_INSTRUCTION}"
+    user = _build_edit_prompt(
+        current, text, sender_name, participants, currencies, categories, today
+    )
+    return _run(system, user, "extract_edit")

@@ -71,6 +71,10 @@ model Expense {
   recurringExpenseLink   RecurringExpenseLink?
   recurringExpenseLinkId String?
 
+  // gastito: WhatsApp message ids (the bot's confirmation messages) that point
+  // back at this expense, so a member replying/quoting one can edit it.
+  messageRefs      WhatsAppMessageRef[]
+
   @@unique([source, externalId])
 }
 
@@ -164,4 +168,16 @@ model WhatsAppMember {
   createdAt     DateTime    @default(now())
 
   @@unique([chatId, senderJid])
+}
+
+// gastito: maps a WhatsApp message id (the bot's confirmation message, or any
+// message that concerns an expense) to the expense it refers to. When a member
+// replies/quotes that message with a correction, the bot resolves the quoted
+// `replied_to_id` here to find which expense to edit. (Replying to the member's
+// own original message also works via Expense.externalId, checked as a fallback.)
+model WhatsAppMessageRef {
+  messageId String   @id
+  expense   Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  expenseId String
+  createdAt DateTime @default(now())
 }

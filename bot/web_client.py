@@ -94,6 +94,33 @@ class WebClient:
             resp.raise_for_status()
         return resp.json()
 
+    def update_expense(self, expense_id: str, payload: dict) -> dict:
+        resp = self._patch(f"/expenses/{expense_id}", payload)
+        if resp.status_code >= 400:
+            logger.error("update_expense failed (%s): %s", resp.status_code, resp.text)
+            resp.raise_for_status()
+        return resp.json()
+
+    # --- reply-to-edit: message <-> expense links --------------------------
+    def get_expense_by_message(self, message_id: str) -> dict | None:
+        """Resolve a quoted message id to its expense, or None if not linked."""
+        resp = self._get("/message-refs", {"messageId": message_id})
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()["expense"]
+
+    def record_message_ref(self, message_id: str, expense_id: str) -> bool:
+        """Link a WhatsApp message id to an expense. Returns True if newly
+        created, False if it was already recorded (idempotency lock)."""
+        resp = self._post(
+            "/message-refs", {"messageId": message_id, "expenseId": expense_id}
+        )
+        if resp.status_code >= 400:
+            logger.error("record_message_ref failed (%s): %s", resp.status_code, resp.text)
+            return False
+        return bool(resp.json().get("created"))
+
     def delete_expense(self, expense_id: str, group_id: str, participant_id: str | None) -> dict:
         params = {"groupId": group_id}
         if participant_id:

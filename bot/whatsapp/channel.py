@@ -31,6 +31,8 @@ class InboundGroupMessage:
     text: str
     timestamp: str
     raw: dict
+    replied_to_id: str = ""  # id of the quoted message (a reply), if any
+    quoted_body: str = ""  # text of the quoted message, if any
 
 
 def normalize_jid(jid: str) -> str:
@@ -68,6 +70,34 @@ def _extract_text(msg: dict) -> str:
     return ""
 
 
+def _extract_reply(msg: dict) -> tuple[str, str]:
+    """Best-effort (replied_to_id, quoted_body) for a quoted/reply message.
+
+    Confirmed Gowa shape (2026-06-26): ``replied_to_id`` + ``quoted_body``. We
+    also accept a couple of alternate spellings other builds use.
+    """
+    replied_to_id = ""
+    for key in ("replied_to_id", "quoted_message_id", "reply_to_id", "stanza_id"):
+        value = msg.get(key)
+        if isinstance(value, str) and value:
+            replied_to_id = value
+            break
+
+    quoted_body = ""
+    for key in ("quoted_body", "quoted_message", "quoted_text"):
+        value = msg.get(key)
+        if isinstance(value, str) and value:
+            quoted_body = value
+            break
+        if isinstance(value, dict):
+            nested = value.get("body") or value.get("text")
+            if isinstance(nested, str) and nested:
+                quoted_body = nested
+                break
+
+    return replied_to_id, quoted_body
+
+
 _seen_debug = 0
 
 
@@ -89,6 +119,7 @@ def parse_group_message(payload: dict) -> InboundGroupMessage | None:
         _seen_debug += 1
         logger.info("Gowa group payload (debug %s): %s", _seen_debug, msg)
 
+    replied_to_id, quoted_body = _extract_reply(msg)
     return InboundGroupMessage(
         chat_id=chat_id,
         sender_jid=_extract_sender(msg, chat_id),
@@ -97,4 +128,6 @@ def parse_group_message(payload: dict) -> InboundGroupMessage | None:
         text=_extract_text(msg),
         timestamp=str(msg.get("timestamp", "")),
         raw=msg,
+        replied_to_id=replied_to_id,
+        quoted_body=quoted_body,
     )

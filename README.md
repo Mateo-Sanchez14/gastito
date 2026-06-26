@@ -64,6 +64,19 @@ WhatsApp grupo
 | `/cotizacion oficial\|blue\|mep` | Elige qué dólar usar para convertir ARS |
 | `ayuda` | Ayuda |
 
+### Editar un gasto
+
+Para corregir un gasto, **respondé (citá) el mensaje de confirmación del gasto**
+(o tu mensaje original) y escribí la corrección en lenguaje natural — el bot usa
+el mensaje citado como contexto para saber qué gasto editar. Ejemplos:
+
+- _"eran 8000 no 800"_ — corrige el monto
+- _"en realidad pagó Benja"_ — cambia quién pagó
+- _"dividí entre todos menos Pichi"_ — cambia entre quiénes se divide
+
+El bot reconstruye el gasto completo (manteniendo lo que no cambiás), actualiza
+spliit y confirma con `✏️ Actualizado: …`. Cualquier miembro del grupo puede editar.
+
 ## Deploy
 
 Corre en el droplet `root@msanchez.me`, integrado al deployment-server: en

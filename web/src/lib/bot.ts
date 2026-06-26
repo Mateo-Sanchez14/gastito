@@ -84,6 +84,90 @@ export async function getExpenseByExternalId(source: string, externalId: string)
 }
 
 /**
+ * Record that a WhatsApp message id refers to an expense (the bot's confirmation
+ * messages, so replying to one later resolves the expense to edit). Create-only:
+ * returns `created: false` if the id was already recorded, which the bot also
+ * uses as an idempotency lock for an inbound edit message.
+ */
+export async function recordMessageRef(messageId: string, expenseId: string) {
+  const existing = await prisma.whatsAppMessageRef.findUnique({
+    where: { messageId },
+  })
+  if (existing) return { created: false, expenseId: existing.expenseId }
+  try {
+    await prisma.whatsAppMessageRef.create({ data: { messageId, expenseId } })
+    return { created: true, expenseId }
+  } catch (err) {
+    // A concurrent retry won the race; treat as already-recorded.
+    const message = err instanceof Error ? err.message : String(err)
+    if (message.includes('Unique constraint')) {
+      return { created: false, expenseId }
+    }
+    throw err
+  }
+}
+
+/**
+ * Resolve a quoted WhatsApp message id to the expense it concerns. Checks the
+ * message-ref table first (bot confirmations), then falls back to the expense's
+ * own `externalId` (a member replying to their own original message).
+ */
+export async function getExpenseIdByMessage(
+  messageId: string,
+): Promise<string | null> {
+  const ref = await prisma.whatsAppMessageRef.findUnique({
+    where: { messageId },
+    select: { expenseId: true },
+  })
+  if (ref) return ref.expenseId
+  const expense = await prisma.expense.findUnique({
+    where: { source_externalId: { source: 'whatsapp', externalId: messageId } },
+    select: { id: true },
+  })
+  return expense?.id ?? null
+}
+
+export type BotExpenseDetail = {
+  id: string
+  groupId: string
+  title: string
+  categoryId: number
+  amount: number // group-currency (USD) cents
+  originalAmount: number | null
+  originalCurrency: string | null
+  conversionRate: number | null
+  paidById: string
+  paidForIds: string[]
+  splitMode: string
+  expenseDate: string // ISO date (YYYY-MM-DD)
+}
+
+/** Bot-friendly snapshot of an expense, used as context when applying an edit. */
+export async function getBotExpenseDetail(
+  expenseId: string,
+): Promise<BotExpenseDetail | null> {
+  const e = await prisma.expense.findUnique({
+    where: { id: expenseId },
+    include: { paidFor: true },
+  })
+  if (!e) return null
+  return {
+    id: e.id,
+    groupId: e.groupId,
+    title: e.title,
+    categoryId: e.categoryId,
+    amount: e.amount,
+    originalAmount: e.originalAmount,
+    originalCurrency: e.originalCurrency,
+    conversionRate: e.conversionRate ? Number(e.conversionRate) : null,
+    paidById: e.paidById,
+    paidForIds: e.paidFor.map((pf) => pf.participantId),
+    splitMode: e.splitMode,
+    expenseDate: e.expenseDate.toISOString().slice(0, 10),
+  }
+}
+
+/**
  * Find the most recent bot-created expense logged by a given participant in a
  * group, for the `deshacer`/undo command. Uses the Activity audit log
  * (CREATE_EXPENSE rows carry the creating participantId) and confirms the

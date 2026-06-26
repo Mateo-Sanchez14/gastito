@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import date
 
+import pending
 from commands import detect_command, handle_command
 from config import settings
 from fx.provider import ConversionError, convert
@@ -81,6 +82,15 @@ def _process(payload: dict) -> None:
             _process_edit(msg, group_id, link, sender_pid, target, text)
             return
 
+    # Is there an expense waiting on a description or a sí/no for this chat?
+    pend = pending.get(msg.chat_id)
+    if pend:
+        if _handle_pending(msg, pend):
+            return
+        # Not an answer we can use (e.g. a brand-new expense): drop the stale
+        # proposal and process this message fresh.
+        pending.clear(msg.chat_id)
+
     # Expense path requires a known sender.
     if not sender_pid:
         gowa.send_text(
@@ -128,9 +138,12 @@ def _process(payload: dict) -> None:
 
     # NOTE v1: we always split EVENLY among `paid_for` (we don't yet extract
     # per-person amounts/percentages). Named subsets still work via paid_for.
+    # We build the payload now but DON'T save it — it waits for confirmation.
+    # `externalId` is the original message id so the eventual create stays
+    # idempotent and replying to that message later still edits this expense.
     expense_payload: dict = {
         "groupId": group_id,
-        "title": extraction.title or "Gasto",
+        "title": (extraction.title or "").strip() or "Gasto",
         "amount": resolved["usd_cents"],
         "category": _resolve_category(extraction.category, categories),
         "paidById": resolved["paid_by_id"],
@@ -143,27 +156,17 @@ def _process(payload: dict) -> None:
     }
     expense_payload.update(_original_currency_fields(resolved))
 
-    try:
-        result = web.create_expense(expense_payload)
-    except Exception:
-        logger.exception("create_expense failed")
-        gowa.send_text(msg.chat_id, "No pude guardar el gasto 😞. Probá de nuevo.")
+    display = _build_display(extraction, resolved, participants)
+
+    # Always require a description. If the message didn't give one, ask for it
+    # first — we'll confirm once we have it.
+    if not (extraction.title or "").strip():
+        pending.set(msg.chat_id, "description", expense_payload, display)
+        gowa.send_text(msg.chat_id, "📝 ¿De qué fue el gasto? Pasame una descripción cortita.")
         return
 
-    confirmation = _confirmation(
-        extraction,
-        resolved["conv"],
-        resolved["usd_cents"],
-        resolved["currency"],
-        resolved["paid_by_id"],
-        resolved["paid_for"],
-        participants,
-    )
-    conf_id = gowa.send_text(msg.chat_id, confirmation)
-    # Link the confirmation message so a reply to it can edit this expense.
-    expense_id = (result or {}).get("expense", {}).get("id")
-    if conf_id and expense_id:
-        web.record_message_ref(conf_id, expense_id)
+    # Ask for confirmation before saving anything.
+    _present_confirmation(msg.chat_id, expense_payload, display)
 
 
 class _ResolveError(Exception):
@@ -374,6 +377,126 @@ def _resolve_category(name: str | None, categories: list[dict]) -> int:
     return 0
 
 
+# --- confirmation flow -----------------------------------------------------
+
+# Short words we accept as "sí" / "no" when answering a proposal. Matched
+# accent/case-insensitively against the (few) words of the reply.
+_AFFIRM = {
+    "si", "sii", "siii", "sip", "sipi", "sisi", "dale", "ok", "oka", "okok",
+    "okey", "okay", "listo", "joya", "va", "vale", "obvio", "claro", "confirmo",
+    "confirmado", "correcto", "exacto", "tal", "yes", "👍", "✅", "🆗", "🙆",
+}
+_NEGATE = {
+    "no", "nop", "nope", "nada", "cancelar", "cancela", "cancelado", "olvidalo",
+    "olvidate", "borralo", "borra", "negativo", "nel", "❌", "🚫", "👎",
+}
+
+
+def _classify_reply(text: str) -> str | None:
+    """Classify a short reply as 'yes' / 'no' / None (anything else).
+
+    Only a *leading* negate word counts as a rejection, so a correction like
+    "eran 8000 no 800" (where "no" means "not") falls through to be re-parsed
+    instead of being read as a cancel.
+    """
+    words = [w.strip(".,!¡¿?;:") for w in normalize_name(text).split()]
+    words = [w for w in words if w]
+    if not words or len(words) > 4:
+        return None
+    has_no = any(w in _NEGATE for w in words)
+    has_yes = any(w in _AFFIRM for w in words)
+    if words[0] in _NEGATE and not has_yes:
+        return "no"
+    if has_yes and not has_no:
+        return "yes"
+    return None
+
+
+def _handle_pending(msg: InboundGroupMessage, pend: pending.Pending) -> bool:
+    """React to a reply to a pending proposal. Returns True if it was consumed."""
+    text = (msg.text or "").strip()
+    kind = _classify_reply(text)
+
+    if pend.stage == "description":
+        if kind == "no":
+            pending.clear(msg.chat_id)
+            gowa.send_text(msg.chat_id, "❌ Listo, lo descarté.")
+            return True
+        # Use the message as the description, then ask to confirm.
+        description = text[:80].strip() or "Gasto"
+        pend.payload["title"] = description
+        pend.display["title"] = description
+        _present_confirmation(msg.chat_id, pend.payload, pend.display)
+        return True
+
+    # stage == "confirmation"
+    if kind == "yes":
+        _confirm_and_save(msg, pend)  # clears the proposal only once it's saved
+        return True
+    if kind == "no":
+        pending.clear(msg.chat_id)
+        gowa.send_text(msg.chat_id, "❌ Listo, lo descarté.")
+        return True
+    return False  # not a sí/no — let the caller treat it as a new message
+
+
+def _present_confirmation(chat_id: str, payload: dict, display: dict) -> None:
+    pending.set(chat_id, "confirmation", payload, display)
+    gowa.send_text(chat_id, _preview_text(display))
+
+
+def _confirm_and_save(msg: InboundGroupMessage, pend: pending.Pending) -> None:
+    """Create the confirmed expense, then only react to the confirming message."""
+    try:
+        web.create_expense(pend.payload)
+    except Exception:
+        logger.exception("create_expense failed")
+        # Keep the proposal so a follow-up "sí" can retry after a transient error.
+        gowa.send_text(msg.chat_id, "No pude guardar el gasto 😞. Respondé *sí* para reintentar.")
+        return
+    pending.clear(msg.chat_id)
+    # Once confirmed the bot stays quiet and just reacts to the "sí".
+    gowa.react(msg.chat_id, msg.message_id, "✅")
+
+
+def _build_display(extraction, resolved: dict, participants: list[dict]) -> dict:
+    """Snapshot the fields needed to render the confirmation preview later."""
+    name_by_id = {p["id"]: p["name"] for p in participants}
+    everyone = len(resolved["paid_for"]) == len(participants)
+    among = "todos" if everyone else ", ".join(p["name"] for p in resolved["paid_for"])
+    return {
+        "title": (extraction.title or "").strip(),
+        "usd_cents": resolved["usd_cents"],
+        "currency": resolved["currency"],
+        "amount": extraction.amount,
+        "fx_label": resolved["conv"].label,
+        "payer_name": name_by_id.get(resolved["paid_by_id"], "alguien"),
+        "among": among,
+    }
+
+
+def _suspicious_line(payer_name: str) -> str | None:
+    """Running gag: if the configured member is the payer, flag it as fishy."""
+    target = normalize_name(settings.suspicious_payer_name)
+    if target and target in normalize_name(payer_name):
+        return f"👀 Ojo: lo pagó {payer_name}… me parece medio sospechoso 🤨"
+    return None
+
+
+def _preview_text(display: dict) -> str:
+    """The 'voy a registrar… ¿confirmo?' message shown before saving."""
+    title = display["title"] or "Gasto"
+    line = f"📝 Voy a registrar: {format_money(display['usd_cents'])} — {title}"
+    if display["currency"] != "USD":
+        line += f" ({display['amount']:g} {display['currency']} @ {display['fx_label']})"
+    line += f"\nPagó {display['payer_name']}, dividido entre {display['among']}."
+    susp = _suspicious_line(display["payer_name"])
+    if susp:
+        line += f"\n{susp}"
+    line += "\n\n¿Lo confirmo? Respondé *sí* o *no*."
+    return line
+
+
 def _confirmation(
     extraction, conv, usd_cents, currency, paid_by_id, paid_for, participants, edited=False
 ) -> str:
@@ -387,4 +510,7 @@ def _confirmation(
     if currency != "USD":
         line += f" ({extraction.amount:g} {currency} @ {conv.label})"
     line += f"\nPagó {payer}, dividido entre {among}."
+    susp = _suspicious_line(payer)
+    if susp:
+        line += f"\n{susp}"
     return line

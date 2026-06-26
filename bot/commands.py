@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 HELP_TEXT = (
     "🤖 *gastito* — cómo usarme:\n"
     "• Contá un gasto en lenguaje natural: _\"pagué 15 lucas de birra, entre todos\"_\n"
+    "• Te muestro cómo quedaría y lo guardo recién cuando respondés *sí* "
+    "(o *no* para descartarlo). Si no aclarás de qué fue, te pregunto la descripción.\n"
     "• *Editar un gasto*: respondé (citá) el mensaje del gasto con la corrección, "
     "ej. _\"eran 8000 no 800\"_ o _\"dividí entre todos menos Pichi\"_\n"
     "• `/soy <tu nombre>` — vinculá tu WhatsApp a tu nombre del grupo\n"

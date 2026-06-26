@@ -8,6 +8,7 @@ full JID — for a group that's the ``...@g.us`` chat id.
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 
 import httpx
 
@@ -56,3 +57,13 @@ class GowaClient:
         """Show/clear the typing indicator (best-effort)."""
         resp = self._post("/send/chat-presence", {"phone": to, "action": action})
         return resp.status_code < 400
+
+    def react(self, to: str, message_id: str, emoji: str) -> bool:
+        """React to a message with an emoji (best-effort). ``to`` is a full JID
+        (group ``...@g.us``); ``message_id`` is the message being reacted to."""
+        path = f"/message/{quote(message_id, safe='')}/reaction"
+        resp = self._post(path, {"phone": to, "emoji": emoji})
+        if resp.status_code >= 400:
+            logger.error("Gowa react failed (%s): %s", resp.status_code, resp.text)
+            return False
+        return True

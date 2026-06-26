@@ -37,6 +37,10 @@ class Settings:
     joke_target_name: str
     joke_roasts_enabled: bool
 
+    # Running gag: when this member is the payer, the confirmation flags the
+    # expense as "suspicious". Empty turns it off. Case/accent-insensitive match.
+    suspicious_payer_name: str
+
     # FX
     dolarapi_url: str
     fx_general_url: str
@@ -65,6 +69,7 @@ def load_settings() -> Settings:
         joke_target_name=os.getenv("JOKE_TARGET_NAME", "Benja"),
         joke_roasts_enabled=os.getenv("JOKE_ROASTS_ENABLED", "true").lower()
         in ("1", "true", "yes", "on"),
+        suspicious_payer_name=os.getenv("SUSPICIOUS_PAYER_NAME", "Pichi"),
         dolarapi_url=os.getenv("DOLARAPI_URL", "https://dolarapi.com").rstrip("/"),
         fx_general_url=os.getenv("FX_GENERAL_URL", "https://open.er-api.com").rstrip("/"),
         port=int(os.getenv("BOT_PORT", "8000")),

@@ -52,7 +52,7 @@ WhatsApp grupo
    ```
 6. **Presentarse:** cada integrante manda en el grupo `/soy <su nombre>` (el mismo
    nombre que el participante en la web).
-7. ¡Listo! Mandá _"pagué 15 lucas de birra, entre todos"_ y miralo aparecer en la web.
+7. ¡Listo! Mandá _"pagué 15 lucas de birra, entre todos"_, confirmá con *sí* y miralo aparecer en la web.
 
 ## Comandos del bot
 
@@ -64,11 +64,20 @@ WhatsApp grupo
 | `/cotizacion oficial\|blue\|mep` | Elige qué dólar usar para convertir ARS |
 | `ayuda` | Ayuda |
 
+### Registrar un gasto (con confirmación)
+
+Cuando contás un gasto, el bot **no lo guarda de una**: te muestra cómo quedaría
+(_"📝 Voy a registrar: …"_) y lo registra recién cuando respondés *sí*. Con *no*
+lo descarta. Si no aclaraste de qué fue, primero te pide una descripción. Una vez
+confirmado, el bot no manda otro mensaje: solo reacciona con ✅ al *sí*. (Si lo
+pagó Pichi, la confirmación lo marca como sospechoso 👀.)
+
 ### Editar un gasto
 
-Para corregir un gasto, **respondé (citá) el mensaje de confirmación del gasto**
-(o tu mensaje original) y escribí la corrección en lenguaje natural — el bot usa
-el mensaje citado como contexto para saber qué gasto editar. Ejemplos:
+Para corregir un gasto, **respondé (citá) tu mensaje original del gasto** (o el
+`✏️ Actualizado: …` de una corrección previa) y escribí la corrección en lenguaje
+natural — el bot usa el mensaje citado como contexto para saber qué gasto editar.
+Ejemplos:
 
 - _"eran 8000 no 800"_ — corrige el monto
 - _"en realidad pagó Benja"_ — cambia quién pagó

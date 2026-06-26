@@ -31,6 +31,12 @@ class Settings:
     # Small human-cadence pause before the bot acts/replies (seconds).
     reply_delay_seconds: float
 
+    # Easter egg: when this group member cracks a joke, the bot roasts them back
+    # (about being tall, AI replacing their job, or talking loud). Empty/disabled
+    # turns the feature off. Match is case/accent-insensitive against the name.
+    joke_target_name: str
+    joke_roasts_enabled: bool
+
     # FX
     dolarapi_url: str
     fx_general_url: str
@@ -56,6 +62,9 @@ def load_settings() -> Settings:
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         confidence_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),
         reply_delay_seconds=float(os.getenv("BOT_REPLY_DELAY_SECONDS", "2")),
+        joke_target_name=os.getenv("JOKE_TARGET_NAME", "Benja"),
+        joke_roasts_enabled=os.getenv("JOKE_ROASTS_ENABLED", "true").lower()
+        in ("1", "true", "yes", "on"),
         dolarapi_url=os.getenv("DOLARAPI_URL", "https://dolarapi.com").rstrip("/"),
         fx_general_url=os.getenv("FX_GENERAL_URL", "https://open.er-api.com").rstrip("/"),
         port=int(os.getenv("BOT_PORT", "8000")),

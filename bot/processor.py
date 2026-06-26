@@ -13,7 +13,7 @@ from datetime import date
 from commands import detect_command, handle_command
 from config import settings
 from fx.provider import ConversionError, convert
-from llm.extractor import extract, extract_edit
+from llm.extractor import extract, extract_edit, roast_joke
 from util import format_money, match_participant, normalize_name
 from web_client import WebClient
 from whatsapp.channel import InboundGroupMessage, parse_group_message
@@ -107,7 +107,8 @@ def _process(payload: dict) -> None:
         return
 
     if extraction.message_type == "chitchat":
-        return  # stay quiet on non-expense chatter
+        _maybe_roast(msg, participants, sender_pid)  # easter egg: roast the target's jokes
+        return  # otherwise stay quiet on non-expense chatter
     if extraction.message_type == "command":
         gowa.send_text(msg.chat_id, "¿Querías un comando? Probá `ayuda`.")
         return
@@ -338,6 +339,29 @@ def _process_edit(
     # Link the new confirmation so a further reply keeps editing the same expense.
     if conf_id:
         web.record_message_ref(conf_id, expense_id)
+
+
+def _maybe_roast(
+    msg: InboundGroupMessage, participants: list[dict], sender_pid: str | None
+) -> None:
+    """Easter egg: if the configured target member cracked a joke, roast back."""
+    if not settings.joke_roasts_enabled or not settings.joke_target_name:
+        return
+
+    # Sender's display name: their participant name, falling back to the pushname.
+    sender_name = next(
+        (p["name"] for p in participants if p["id"] == sender_pid), ""
+    ) or (msg.sender_name or "")
+
+    target = normalize_name(settings.joke_target_name)
+    if target not in normalize_name(sender_name) and target not in normalize_name(
+        msg.sender_name or ""
+    ):
+        return  # not the target member — stay quiet
+
+    result = roast_joke(msg.text, sender_name)
+    if result and result.is_joke and result.roast and result.roast.strip():
+        gowa.send_text(msg.chat_id, result.roast.strip())
 
 
 def _resolve_category(name: str | None, categories: list[dict]) -> int:

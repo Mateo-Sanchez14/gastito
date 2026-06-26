@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 
 import httpx
 
 from config import settings
-from llm.schema import JSON_INSTRUCTION, ExpenseExtraction
+from llm.schema import (
+    JSON_INSTRUCTION,
+    ROAST_JSON_INSTRUCTION,
+    ExpenseExtraction,
+    RoastResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +123,7 @@ def _build_edit_prompt(
     )
 
 
-def _call_github_models(system: str, user: str) -> dict:
+def _call_github_models(system: str, user: str, temperature: float = 0.0) -> dict:
     """Primary: GitHub Models, OpenAI-compatible chat completions in JSON mode."""
     if not settings.github_models_token:
         raise RuntimeError("GITHUB_MODELS_TOKEN not configured")
@@ -131,7 +137,7 @@ def _call_github_models(system: str, user: str) -> dict:
                 {"role": "user", "content": user},
             ],
             "response_format": {"type": "json_object"},
-            "temperature": 0,
+            "temperature": temperature,
         },
         timeout=30,
     )
@@ -140,7 +146,7 @@ def _call_github_models(system: str, user: str) -> dict:
     return json.loads(content)
 
 
-def _call_gemini(system: str, user: str) -> dict:
+def _call_gemini(system: str, user: str, temperature: float = 0.0) -> dict:
     """Fallback: Gemini generateContent with JSON response."""
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
@@ -153,7 +159,10 @@ def _call_gemini(system: str, user: str) -> dict:
         json={
             "system_instruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": temperature,
+            },
         },
         timeout=30,
     )
@@ -214,3 +223,47 @@ def extract_edit(
         current, text, sender_name, participants, currencies, categories, today
     )
     return _run(system, user, "extract_edit")
+
+
+# Easter egg: roast a specific member when they crack a joke. The three running
+# gags about them: they're very tall, AI could do their job, and they talk loud.
+_ROAST_THEMES = {
+    "alto": "que es altísimo / un poste / le pega el sol primero",
+    "ia": "que una IA le puede hacer el laburo / lo reemplaza un script",
+    "fuerte": "que habla re fuerte / grita / lo escucha todo el barrio",
+}
+
+ROAST_SYSTEM_PROMPT = """\
+Sos el bot cargador de un grupo de amigos. {target} es un personaje del grupo con tres
+chistes recurrentes: es MUY alto, habla muy fuerte, y su trabajo lo podría hacer una IA.
+
+Te paso un mensaje que mandó {target}. Si es un CHISTE, una joda o una cargada, respondé
+con una cargada corta, ingeniosa y de buena onda (1 o 2 frases, español rioplatense, podés
+usar 1 emoji) enfocada en ESTE tema: {theme}.
+Si el mensaje NO es un chiste (es algo serio, una pregunta real, un gasto, etc.), NO lo
+cargues: devolvé is_joke=false.
+"""
+
+
+def roast_joke(text: str, target_name: str) -> RoastResult | None:
+    """If ``target_name``'s message is a joke, return a roast to fire back."""
+    theme_key = random.choice(list(_ROAST_THEMES))
+    system = (
+        ROAST_SYSTEM_PROMPT.format(target=target_name or "el pibe", theme=_ROAST_THEMES[theme_key])
+        + "\n\n"
+        + ROAST_JSON_INSTRUCTION
+    )
+    user = f"Mensaje de {target_name or 'el pibe'}:\n{text}"
+
+    for name, provider in (("github_models", _call_github_models), ("gemini", _call_gemini)):
+        try:
+            data = provider(system, user, 0.9)
+        except Exception as e:
+            logger.warning("Roast provider %s failed: %s", name, e)
+            continue
+        try:
+            return RoastResult(**data)
+        except Exception:
+            logger.exception("Roast provider %s returned unparseable data: %s", name, data)
+            continue
+    return None

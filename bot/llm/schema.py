@@ -26,6 +26,20 @@ class ExpenseExtraction(BaseModel):
     clarification_needed: Optional[str] = None
 
 
+class RoastResult(BaseModel):
+    """Easter egg: is a group member's message a joke, and the roast to fire back."""
+
+    is_joke: bool = False
+    roast: Optional[str] = None
+
+
+ROAST_JSON_INSTRUCTION = """\
+Respondé ÚNICAMENTE con un objeto JSON (sin texto alrededor, sin markdown) con estas claves:
+- is_joke: boolean (true solo si el mensaje es un chiste, joda o cargada; false si es serio)
+- roast: string (la cargada para responder, en español rioplatense; "" si is_joke es false)
+"""
+
+
 # Instruction appended to the system prompt so both providers (GitHub Models in
 # JSON mode, Gemini with responseMimeType application/json) emit exactly these
 # keys. Parsed and validated into ExpenseExtraction.

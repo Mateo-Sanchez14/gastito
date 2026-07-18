@@ -31,6 +31,27 @@ SUPPORTED_CURRENCIES = [
 ]
 
 
+def _first_name(name: str) -> str:
+    parts = (name or "").strip().split()
+    return parts[0] if parts else ""
+
+
+def _addressed(name: str, body: str) -> str:
+    """Prefix a reply with the member's first name, so in a busy group everyone
+    can tell whose expense the bot is talking about."""
+    first = _first_name(name)
+    return f"{first}, {body}" if first else body
+
+
+def _reply(msg: InboundGroupMessage, body: str) -> str | None:
+    """Answer the member who wrote ``msg``: name them AND quote their message,
+    so several people loading expenses at once stay untangled — each prompt is
+    visibly threaded to the person it's for. Returns the sent message id."""
+    return gowa.send_text(
+        msg.chat_id, _addressed(msg.sender_name, body), reply_to=msg.message_id
+    )
+
+
 def process_payload(payload: dict) -> None:
     """Entry point for the background task. Never raises."""
     try:
@@ -82,19 +103,21 @@ def _process(payload: dict) -> None:
             _process_edit(msg, group_id, link, sender_pid, target, text)
             return
 
-    # Is there an expense waiting on a description or a sí/no for this chat?
-    pend = pending.get(msg.chat_id)
+    # Does THIS sender have an expense waiting on a description or a sí/no?
+    # Keyed per member, so another person's pending proposal is never touched
+    # and a "sí" only ever confirms the sender's own expense.
+    pend = pending.get(msg.chat_id, msg.sender_jid)
     if pend:
         if _handle_pending(msg, pend):
             return
-        # Not an answer we can use (e.g. a brand-new expense): drop the stale
-        # proposal and process this message fresh.
-        pending.clear(msg.chat_id)
+        # Not an answer we can use (e.g. a brand-new expense): drop this
+        # sender's stale proposal and process the message fresh.
+        pending.clear(msg.chat_id, msg.sender_jid)
 
     # Expense path requires a known sender.
     if not sender_pid:
-        gowa.send_text(
-            msg.chat_id,
+        _reply(
+            msg,
             "👋 No sé quién sos todavía. Respondé `/soy <tu nombre>` para empezar.",
         )
         return
@@ -113,27 +136,27 @@ def _process(payload: dict) -> None:
         today,
     )
     if extraction is None:
-        gowa.send_text(msg.chat_id, "Uy, no pude procesar eso 😞. ¿Lo reescribís?")
+        _reply(msg, "Uy, no pude procesar eso 😞. ¿Lo reescribís?")
         return
 
     if extraction.message_type == "chitchat":
         _maybe_roast(msg, participants, sender_pid)  # easter egg: roast the target's jokes
         return  # otherwise stay quiet on non-expense chatter
     if extraction.message_type == "command":
-        gowa.send_text(msg.chat_id, "¿Querías un comando? Probá `ayuda`.")
+        _reply(msg, "¿Querías un comando? Probá `ayuda`.")
         return
 
     # --- it's an expense ---
     if extraction.confidence < settings.confidence_threshold or not extraction.amount:
         question = extraction.clarification_needed or "¿Cuánto fue y entre quiénes lo divido?"
-        gowa.send_text(msg.chat_id, f"🤔 {question}")
+        _reply(msg, f"🤔 {question}")
         return
 
     # Resolve payer (default: the sender), split, and FX (shared with edits).
     try:
         resolved = _resolve_expense_fields(extraction, participants, link, sender_pid)
     except _ResolveError as e:
-        gowa.send_text(msg.chat_id, e.reply)
+        _reply(msg, e.reply)
         return
 
     # NOTE v1: we always split EVENLY among `paid_for` (we don't yet extract
@@ -161,12 +184,12 @@ def _process(payload: dict) -> None:
     # Always require a description. If the message didn't give one, ask for it
     # first — we'll confirm once we have it.
     if not (extraction.title or "").strip():
-        pending.set(msg.chat_id, "description", expense_payload, display)
-        gowa.send_text(msg.chat_id, "📝 ¿De qué fue el gasto? Pasame una descripción cortita.")
+        pending.set(msg.chat_id, msg.sender_jid, "description", expense_payload, display)
+        _reply(msg, "📝 ¿De qué fue el gasto? Pasame una descripción cortita.")
         return
 
     # Ask for confirmation before saving anything.
-    _present_confirmation(msg.chat_id, expense_payload, display)
+    _present_confirmation(msg, expense_payload, display)
 
 
 class _ResolveError(Exception):
@@ -282,7 +305,7 @@ def _process_edit(
         today,
     )
     if extraction is None:
-        gowa.send_text(msg.chat_id, "Uy, no pude procesar la corrección 😞. ¿La reescribís?")
+        _reply(msg, "Uy, no pude procesar la corrección 😞. ¿La reescribís?")
         return
 
     # Not actually a correction (a comment/emoji/thanks) — stay quiet.
@@ -290,7 +313,7 @@ def _process_edit(
         return
     if extraction.confidence < settings.confidence_threshold or not extraction.amount:
         question = extraction.clarification_needed or "¿Qué querés corregir del gasto?"
-        gowa.send_text(msg.chat_id, f"🤔 {question}")
+        _reply(msg, f"🤔 {question}")
         return
 
     # Idempotency lock: claim this inbound edit message before mutating. A Gowa
@@ -305,7 +328,7 @@ def _process_edit(
             extraction, participants, link, target.get("paidById")
         )
     except _ResolveError as e:
-        gowa.send_text(msg.chat_id, e.reply)
+        _reply(msg, e.reply)
         return
 
     edit_payload: dict = {
@@ -325,7 +348,7 @@ def _process_edit(
         web.update_expense(expense_id, edit_payload)
     except Exception:
         logger.exception("update_expense failed")
-        gowa.send_text(msg.chat_id, "No pude actualizar el gasto 😞. Probá de nuevo.")
+        _reply(msg, "No pude actualizar el gasto 😞. Probá de nuevo.")
         return
 
     confirmation = _confirmation(
@@ -338,7 +361,7 @@ def _process_edit(
         participants,
         edited=True,
     )
-    conf_id = gowa.send_text(msg.chat_id, confirmation)
+    conf_id = _reply(msg, confirmation)
     # Link the new confirmation so a further reply keeps editing the same expense.
     if conf_id:
         web.record_message_ref(conf_id, expense_id)
@@ -364,7 +387,7 @@ def _maybe_roast(
 
     result = roast_joke(msg.text, sender_name)
     if result and result.is_joke and result.roast and result.roast.strip():
-        gowa.send_text(msg.chat_id, result.roast.strip())
+        _reply(msg, result.roast.strip())
 
 
 def _resolve_category(name: str | None, categories: list[dict]) -> int:
@@ -419,14 +442,14 @@ def _handle_pending(msg: InboundGroupMessage, pend: pending.Pending) -> bool:
 
     if pend.stage == "description":
         if kind == "no":
-            pending.clear(msg.chat_id)
-            gowa.send_text(msg.chat_id, "❌ Listo, lo descarté.")
+            pending.clear(msg.chat_id, msg.sender_jid)
+            _reply(msg, "❌ Listo, lo descarté.")
             return True
         # Use the message as the description, then ask to confirm.
         description = text[:80].strip() or "Gasto"
         pend.payload["title"] = description
         pend.display["title"] = description
-        _present_confirmation(msg.chat_id, pend.payload, pend.display)
+        _present_confirmation(msg, pend.payload, pend.display)
         return True
 
     # stage == "confirmation"
@@ -434,15 +457,15 @@ def _handle_pending(msg: InboundGroupMessage, pend: pending.Pending) -> bool:
         _confirm_and_save(msg, pend)  # clears the proposal only once it's saved
         return True
     if kind == "no":
-        pending.clear(msg.chat_id)
-        gowa.send_text(msg.chat_id, "❌ Listo, lo descarté.")
+        pending.clear(msg.chat_id, msg.sender_jid)
+        _reply(msg, "❌ Listo, lo descarté.")
         return True
     return False  # not a sí/no — let the caller treat it as a new message
 
 
-def _present_confirmation(chat_id: str, payload: dict, display: dict) -> None:
-    pending.set(chat_id, "confirmation", payload, display)
-    gowa.send_text(chat_id, _preview_text(display))
+def _present_confirmation(msg: InboundGroupMessage, payload: dict, display: dict) -> None:
+    pending.set(msg.chat_id, msg.sender_jid, "confirmation", payload, display)
+    _reply(msg, _preview_text(display))
 
 
 def _confirm_and_save(msg: InboundGroupMessage, pend: pending.Pending) -> None:
@@ -452,9 +475,9 @@ def _confirm_and_save(msg: InboundGroupMessage, pend: pending.Pending) -> None:
     except Exception:
         logger.exception("create_expense failed")
         # Keep the proposal so a follow-up "sí" can retry after a transient error.
-        gowa.send_text(msg.chat_id, "No pude guardar el gasto 😞. Respondé *sí* para reintentar.")
+        _reply(msg, "No pude guardar el gasto 😞. Respondé *sí* para reintentar.")
         return
-    pending.clear(msg.chat_id)
+    pending.clear(msg.chat_id, msg.sender_jid)
     # Once confirmed the bot stays quiet and just reacts to the "sí".
     gowa.react(msg.chat_id, msg.message_id, "✅")
 

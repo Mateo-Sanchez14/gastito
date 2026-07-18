@@ -41,9 +41,17 @@ class GowaClient:
             resp = do({})
         return resp
 
-    def send_text(self, to: str, body: str) -> str | None:
-        """Send a text message. ``to`` is a full JID (group ``...@g.us``)."""
-        resp = self._post("/send/message", {"phone": to, "message": body})
+    def send_text(self, to: str, body: str, reply_to: str | None = None) -> str | None:
+        """Send a text message. ``to`` is a full JID (group ``...@g.us``).
+
+        ``reply_to`` (a message id) quotes that message, so in a busy group the
+        reply is visibly threaded to the member it's answering — no confusion
+        about whose pending expense the bot is talking about.
+        """
+        json: dict = {"phone": to, "message": body}
+        if reply_to:
+            json["reply_message_id"] = reply_to
+        resp = self._post("/send/message", json)
         if resp.status_code >= 400:
             logger.error("Gowa send_text failed (%s): %s", resp.status_code, resp.text)
             return None

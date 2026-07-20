@@ -25,13 +25,14 @@ model Group {
 }
 
 model Participant {
-  id              String           @id
+  id              String             @id
   name            String
-  group           Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group           Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
   groupId         String
   expensesPaidBy  Expense[]
   expensesPaidFor ExpensePaidFor[]
   whatsappMembers WhatsAppMember[]
+  aliases         ParticipantAlias[]
 }
 
 model Category {
@@ -180,4 +181,22 @@ model WhatsAppMessageRef {
   expense   Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   expenseId String
   createdAt DateTime @default(now())
+}
+
+// gastito: extra nicknames (apodos) that resolve to a Participant, so the bot
+// recognizes e.g. "Tuco"/"Tuquina" as "Fer" or "Agustin" as "Pichi". Seeded
+// once and extended live via the `/apodo` command. `normalized` is lowercased +
+// accent-stripped for lookup; unique per group so one apodo can't map to two
+// people.
+model ParticipantAlias {
+  id            String      @id @default(cuid())
+  participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  participantId String
+  groupId       String
+  alias         String
+  normalized    String
+  createdAt     DateTime    @default(now())
+
+  @@unique([groupId, normalized])
+  @@index([participantId])
 }

@@ -81,6 +81,18 @@ class WebClient:
         resp.raise_for_status()
         return resp.json()
 
+    # --- aliases (apodos) --------------------------------------------------
+    def add_aliases(self, group_id: str, participant_id: str, aliases: list[str]) -> dict:
+        """Attach nickname(s) to a participant. Returns {added, conflicts}."""
+        resp = self._post(
+            "/aliases",
+            {"groupId": group_id, "participantId": participant_id, "aliases": aliases},
+        )
+        if resp.status_code >= 400:
+            logger.error("add_aliases failed (%s): %s", resp.status_code, resp.text)
+            resp.raise_for_status()
+        return resp.json()
+
     def get_balances(self, group_id: str) -> dict:
         resp = self._get(f"/groups/{group_id}/balances")
         resp.raise_for_status()

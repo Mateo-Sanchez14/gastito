@@ -59,11 +59,22 @@ WhatsApp grupo
 | Comando | Qué hace |
 |---|---|
 | `/soy <nombre>` | Vincula tu WhatsApp a tu participante del grupo |
+| `/apodo <apodo> = <participante>` | Anota un apodo, ej. `/apodo Tuco = Fer` (o varios: `/apodo Fer = Fernando, Tuco, Tuquina`) |
 | `saldo` | Muestra quién le debe a quién |
 | `resumen` | Cuánto puso y cuánto gastó cada uno (+ saldo neto) |
 | `deshacer` | Borra tu último gasto |
 | `/cotizacion oficial\|blue\|mep` | Elige qué dólar usar para convertir ARS |
 | `ayuda` | Ayuda |
+
+### Apodos
+
+Cada participante puede tener apodos que el bot reconoce al leer un gasto o al
+resolver quién pagó. Con `/apodo Tuco = Fer` (funciona en cualquier orden), tanto
+_"pagó Tuco"_ como _"dividido entre Tuco y yo"_ resuelven a **Fer**. Un apodo no
+puede repetirse entre personas ni coincidir con el nombre real de otro participante.
+
+> Nota: _"yo"_, _"mí"_, _"conmigo"_ se refieren a quien escribe. Si contás _"gasto
+> entre Benja, Fer y yo"_, el split te incluye a vos automáticamente.
 
 ### Registrar un gasto (con confirmación)
 

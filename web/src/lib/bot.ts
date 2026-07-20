@@ -15,6 +15,71 @@ export type GroupLink = {
   fxArsSource: string
 }
 
+/**
+ * Lowercase + strip accents, for case/accent-insensitive alias matching.
+ * Mirrors the bot's `normalize_name` (Python) so both sides agree on identity.
+ */
+export function normalizeName(name: string): string {
+  return (name ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+/** Display aliases (apodos) for every participant in a group, keyed by id. */
+export async function listAliasesByParticipant(
+  groupId: string,
+): Promise<Record<string, string[]>> {
+  const rows = await prisma.participantAlias.findMany({
+    where: { groupId },
+    orderBy: { createdAt: 'asc' },
+    select: { participantId: true, alias: true },
+  })
+  const byId: Record<string, string[]> = {}
+  for (const r of rows) (byId[r.participantId] ??= []).push(r.alias)
+  return byId
+}
+
+export type AddAliasesResult = {
+  added: string[]
+  /** aliases skipped because they already map to a (possibly different) participant */
+  conflicts: { alias: string; participantId: string }[]
+}
+
+/**
+ * Attach one or more nicknames to a participant. Idempotent per (group, apodo):
+ * an apodo already mapped to THIS participant is a no-op; one mapped to someone
+ * else is reported as a conflict (never silently reassigned).
+ */
+export async function addAliases(
+  groupId: string,
+  participantId: string,
+  aliases: string[],
+): Promise<AddAliasesResult> {
+  const added: string[] = []
+  const conflicts: { alias: string; participantId: string }[] = []
+  for (const raw of aliases) {
+    const alias = raw.trim()
+    if (!alias) continue
+    const normalized = normalizeName(alias)
+    const existing = await prisma.participantAlias.findUnique({
+      where: { groupId_normalized: { groupId, normalized } },
+    })
+    if (existing) {
+      if (existing.participantId !== participantId) {
+        conflicts.push({ alias, participantId: existing.participantId })
+      }
+      continue // already recorded (same participant) -> idempotent no-op
+    }
+    await prisma.participantAlias.create({
+      data: { groupId, participantId, alias, normalized },
+    })
+    added.push(alias)
+  }
+  return { added, conflicts }
+}
+
 /** Resolve a WhatsApp group (chatId "...@g.us") to its linked spliit Group. */
 export async function getGroupLinkByChatId(
   chatId: string,

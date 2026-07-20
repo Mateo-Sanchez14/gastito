@@ -130,7 +130,7 @@ def _process(payload: dict) -> None:
     extraction = extract(
         text,
         msg.sender_name,
-        [p["name"] for p in participants],
+        participants,
         SUPPORTED_CURRENCIES,
         [c["name"] for c in categories],
         today,
@@ -299,7 +299,7 @@ def _process_edit(
         current,
         text,
         msg.sender_name,
-        [p["name"] for p in participants],
+        participants,
         SUPPORTED_CURRENCIES,
         [c["name"] for c in categories],
         today,

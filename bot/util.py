@@ -15,25 +15,33 @@ def normalize_name(name: str) -> str:
 
 
 def match_participant(name: str, participants: list[dict]) -> dict | None:
-    """Resolve a free-text name to a participant dict ({id, name}) or None.
+    """Resolve a free-text name to a participant dict ({id, name, aliases?}) or None.
 
-    Tries exact (normalized) match first, then a unique prefix/substring match.
+    Matches (accent/case-insensitively) against each participant's canonical name
+    AND any nicknames in ``aliases``. Tries exact match first (so "Tuco" -> Fer),
+    then a unique prefix/substring match ("Fernando" -> Fer).
     """
     if not name:
         return None
     target = normalize_name(name)
-    norm = [(normalize_name(p["name"]), p) for p in participants]
+    # (normalized_label, participant) for the canonical name and every alias.
+    norm: list[tuple[str, dict]] = []
+    for p in participants:
+        norm.append((normalize_name(p["name"]), p))
+        for alias in p.get("aliases") or []:
+            norm.append((normalize_name(alias), p))
 
     for n, p in norm:
         if n == target:
             return p
 
     starts = [p for n, p in norm if n.startswith(target) or target.startswith(n)]
-    if len(starts) == 1:
+    # A prefix hit is only unique if it points at a single participant.
+    if starts and all(p["id"] == starts[0]["id"] for p in starts):
         return starts[0]
 
     contains = [p for n, p in norm if target in n or n in target]
-    if len(contains) == 1:
+    if contains and all(p["id"] == contains[0]["id"] for p in contains):
         return contains[0]
     return None
 

@@ -41,9 +41,16 @@ Reglas:
   12.5 para US$12,50).
 - Inferí la moneda (ISO 4217). Si el mensaje claramente es en pesos argentinos usá ARS,
   chilenos CLP, uruguayos UYU, etc. Si dice "dólares"/"usd" o "$" sin pista de país, usá USD.
+- PRIMERA PERSONA = quien escribe: "yo", "mí", "conmigo", "yo también", "incluido yo" se refieren
+  a la persona indicada en "Quien escribe". Si el mensaje divide el gasto e incluye a quien escribe
+  (ej. "entre Benja, Fer y yo"), AGREGÁ su nombre a paid_for_names. Nunca lo omitas.
 - paid_by_name: si no se aclara quién pagó, dejalo vacío (el sistema asume que pagó quien escribe).
 - paid_for_names: si dice "entre todos" o no aclara, dejá la lista vacía (= todos). Si nombra
-  personas, ponelas. Matcheá nombres sin distinguir mayúsculas/acentos contra la lista provista.
+  personas, ponelas TODAS (incluí a quien escribe cuando corresponda, ver regla de primera persona).
+  Matcheá nombres sin distinguir mayúsculas/acentos contra la lista provista.
+- APODOS: a cada participante le pueden figurar apodos entre paréntesis, "(apodos: ...)". Un apodo
+  refiere al MISMO participante; devolvé SIEMPRE el nombre canónico (el de antes del paréntesis),
+  nunca el apodo. Ej: con "Fer (apodos: Fernando, Tuco)", tanto "Tuco" como "Fernando" -> "Fer".
 - split_mode: EVENLY salvo que indique porcentajes (BY_PERCENTAGE), partes (BY_SHARES) o montos
   exactos por persona (BY_AMOUNT).
 - date: ISO YYYY-MM-DD. "anoche"/"ayer" = el día anterior a hoy; si no se aclara, hoy.
@@ -55,10 +62,24 @@ Reglas:
 """
 
 
+def _format_participants(participants: list[dict]) -> str:
+    """Render participants for the prompt, appending each one's apodos so the
+    model can map a nickname back to the canonical name. e.g.
+    "Fer (apodos: Fernando, Tuco), Benja"."""
+    parts: list[str] = []
+    for p in participants:
+        aliases = [a for a in (p.get("aliases") or []) if a]
+        if aliases:
+            parts.append(f"{p['name']} (apodos: {', '.join(aliases)})")
+        else:
+            parts.append(p["name"])
+    return ", ".join(parts) or "(ninguno)"
+
+
 def _build_user_prompt(
     text: str,
     sender_name: str,
-    participants: list[str],
+    participants: list[dict],
     currencies: list[str],
     categories: list[str],
     today: str,
@@ -66,7 +87,7 @@ def _build_user_prompt(
     return (
         f"Fecha de hoy: {today}\n"
         f"Quien escribe: {sender_name or 'desconocido'}\n"
-        f"Participantes del grupo: {', '.join(participants) or '(ninguno)'}\n"
+        f"Participantes del grupo: {_format_participants(participants)}\n"
         f"Monedas soportadas: {', '.join(currencies)}\n"
         f"Categorías disponibles: {', '.join(categories) or '(ninguna)'}\n\n"
         f"Mensaje:\n{text}"
@@ -87,7 +108,10 @@ Reglas:
   = millones; "gamba" = 100; "mango"/"pesos" = ARS. PUNTO = miles (1.500=1500), COMA = decimal.
 - paid_for_names: si el usuario cambia entre quiénes se divide ("dividí entre todos menos X",
   "solo entre A y B"), calculá la NUEVA lista completa de nombres a partir de los participantes.
-  Si no toca la división, copiá la lista actual. Lista vacía = todos.
+  Si no toca la división, copiá la lista actual. Lista vacía = todos. "yo"/"mí"/"conmigo" se
+  refieren a quien escribe (dato "Quien escribe"): incluí su nombre si el cambio lo abarca.
+- APODOS: a los participantes les pueden figurar apodos entre paréntesis "(apodos: ...)". Un apodo
+  refiere al MISMO participante; devolvé SIEMPRE el nombre canónico, nunca el apodo.
 - paid_by_name: si cambia quién pagó, ponelo; si no, copiá el actual.
 - message_type: "expense" SOLO si el mensaje realmente corrige/cambia el gasto. Si es un
   comentario, emoji, agradecimiento o charla que NO cambia nada, devolvé "chitchat".
@@ -100,7 +124,7 @@ def _build_edit_prompt(
     current: dict,
     text: str,
     sender_name: str,
-    participants: list[str],
+    participants: list[dict],
     currencies: list[str],
     categories: list[str],
     today: str,
@@ -109,7 +133,7 @@ def _build_edit_prompt(
     return (
         f"Fecha de hoy: {today}\n"
         f"Quien escribe: {sender_name or 'desconocido'}\n"
-        f"Participantes del grupo: {', '.join(participants) or '(ninguno)'}\n"
+        f"Participantes del grupo: {_format_participants(participants)}\n"
         f"Monedas soportadas: {', '.join(currencies)}\n"
         f"Categorías disponibles: {', '.join(categories) or '(ninguna)'}\n\n"
         "Gasto ACTUAL (a corregir):\n"
@@ -192,12 +216,16 @@ def _run(system: str, user: str, what: str) -> ExpenseExtraction | None:
 def extract(
     text: str,
     sender_name: str,
-    participants: list[str],
+    participants: list[dict],
     currencies: list[str],
     categories: list[str],
     today: str,
 ) -> ExpenseExtraction | None:
-    """Return a parsed extraction, trying GitHub Models then Gemini."""
+    """Return a parsed extraction, trying GitHub Models then Gemini.
+
+    ``participants`` are the full participant dicts ({id, name, aliases}); their
+    apodos are shown to the model so it maps a nickname to the canonical name.
+    """
     system = f"{SYSTEM_PROMPT}\n\n{JSON_INSTRUCTION}"
     user = _build_user_prompt(text, sender_name, participants, currencies, categories, today)
     return _run(system, user, "extract")
@@ -207,7 +235,7 @@ def extract_edit(
     current: dict,
     text: str,
     sender_name: str,
-    participants: list[str],
+    participants: list[dict],
     currencies: list[str],
     categories: list[str],
     today: str,

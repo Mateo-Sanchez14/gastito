@@ -1,4 +1,5 @@
 import { getCategories, getGroup } from '@/lib/api'
+import { listAliasesByParticipant } from '@/lib/bot'
 import { requireBotAuth } from '@/lib/bot-auth'
 
 // gastito: list a group's participants (+ categories + currency) so the bot can
@@ -16,6 +17,7 @@ export async function GET(
     return Response.json({ error: 'unknown groupId' }, { status: 404 })
   }
   const categories = await getCategories()
+  const aliasesById = await listAliasesByParticipant(groupId)
 
   return Response.json({
     group: {
@@ -24,7 +26,11 @@ export async function GET(
       currency: group.currency,
       currencyCode: group.currencyCode,
     },
-    participants: group.participants.map((p) => ({ id: p.id, name: p.name })),
+    participants: group.participants.map((p) => ({
+      id: p.id,
+      name: p.name,
+      aliases: aliasesById[p.id] ?? [],
+    })),
     categories: categories.map((c) => ({
       id: c.id,
       name: c.name,

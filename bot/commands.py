@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from fx.provider import _ARS_ENDPOINTS
-from util import format_money, match_participant
+from util import format_money, match_participant, normalize_name
 from web_client import WebClient
 from whatsapp.channel import InboundGroupMessage
 
@@ -23,6 +23,7 @@ HELP_TEXT = (
     "• *Editar un gasto*: respondé (citá) el mensaje del gasto con la corrección, "
     "ej. _\"eran 8000 no 800\"_ o _\"dividí entre todos menos Pichi\"_\n"
     "• `/soy <tu nombre>` — vinculá tu WhatsApp a tu nombre del grupo\n"
+    "• `/apodo <apodo> = <participante>` — anotar un apodo, ej. `/apodo Tuco = Fer`\n"
     "• `saldo` — ver quién le debe a quién\n"
     "• `resumen` — ver cuánto puso y cuánto gastó cada uno\n"
     "• `deshacer` — borrar tu último gasto\n"
@@ -36,6 +37,8 @@ def detect_command(text: str) -> str | None:
     t = text.strip().lower()
     if t.startswith(("/soy", "/iam")):
         return "soy"
+    if t.startswith(("/apodo", "/apodos", "/alias")):
+        return "apodo"
     if t in ("saldo", "saldos", "balance", "balances"):
         return "saldo"
     if t in ("resumen", "resúmen", "gastos", "total", "totales", "/resumen", "/gastos"):
@@ -76,6 +79,9 @@ def handle_command(
         web.upsert_member(msg.chat_id, msg.sender_jid, participant["id"], msg.sender_name)
         return f"✅ Listo, te tengo como *{participant['name']}*."
 
+    if command == "apodo":
+        return _handle_apodo(text, group_id, web)
+
     if command == "cotizacion":
         parts = text.strip().split()
         source = parts[1].lower() if len(parts) > 1 else ""
@@ -100,6 +106,91 @@ def handle_command(
         return f"🗑️ Borré tu último gasto: *{last['title']}*."
 
     return None
+
+
+_APODO_USAGE = (
+    "Para anotar un apodo: `/apodo <apodo> = <participante>`\n"
+    "Ej: `/apodo Tuco = Fer` · varios juntos: `/apodo Fer = Fernando, Tuco, Tuquina`"
+)
+
+
+def _handle_apodo(text: str, group_id: str, web: WebClient) -> str:
+    """`/apodo <apodo> = <participante>` — attach nickname(s) to a participant.
+
+    Order-agnostic: whichever side names an existing participant is the target;
+    the other side is the new apodo(s) (comma-separated for several at once).
+    """
+    _, _, rest = text.strip().partition(" ")  # drop the "/apodo" word
+    rest = rest.strip()
+    sep = "=" if "=" in rest else (":" if ":" in rest else None)
+    if not sep:
+        return _APODO_USAGE
+    left, _, right = rest.partition(sep)
+    left, right = left.strip(), right.strip()
+    if not left or not right:
+        return _APODO_USAGE
+
+    participants = web.get_participants(group_id)["participants"]
+
+    # Which side is the existing participant? (a comma-list side is apodos, not a name)
+    left_p = match_participant(left, participants) if "," not in left else None
+    right_p = match_participant(right, participants) if "," not in right else None
+    if left_p and right_p:
+        if left_p["id"] != right_p["id"]:
+            return (
+                f"Ambos son participantes distintos (*{left_p['name']}* y *{right_p['name']}*). "
+                "Poné el apodo nuevo de un lado y el participante del otro."
+            )
+        # Both sides point at the same person: one is an apodo that already
+        # exists. Keep the side that isn't the canonical name as the apodo, so
+        # a re-add lands as an idempotent no-op rather than a false error.
+        canonical = left_p
+        alias_side = (
+            right if normalize_name(left) == normalize_name(canonical["name"]) else left
+        )
+    elif left_p:
+        canonical, alias_side = left_p, right
+    elif right_p:
+        canonical, alias_side = right_p, left
+    else:
+        names = ", ".join(p["name"] for p in participants)
+        return f"No reconozco a ninguno como participante. Participantes: {names}"
+
+    raw_aliases = [a.strip() for a in alias_side.split(",") if a.strip()]
+    if not raw_aliases:
+        return _APODO_USAGE
+
+    # An apodo can't collide with another participant's real name (ambiguous).
+    participant_names = {normalize_name(p["name"]) for p in participants}
+    aliases = [a for a in raw_aliases if normalize_name(a) not in participant_names]
+    name_clashes = [a for a in raw_aliases if normalize_name(a) in participant_names]
+
+    added: list[str] = []
+    conflicts: list[dict] = []
+    if aliases:
+        try:
+            result = web.add_aliases(group_id, canonical["id"], aliases)
+        except Exception:
+            logger.exception("add_aliases failed")
+            return "No pude guardar el apodo 😞. Probá de nuevo."
+        added = result.get("added", [])
+        conflicts = result.get("conflicts", [])
+
+    name_by_id = {p["id"]: p["name"] for p in participants}
+    lines: list[str] = []
+    if added:
+        verb = "es" if len(added) == 1 else "son"
+        lines.append(
+            f"✅ Anotado: *{', '.join(added)}* ahora también {verb} *{canonical['name']}*."
+        )
+    for c in conflicts:
+        owner = name_by_id.get(c.get("participantId"), "otra persona")
+        lines.append(f"⚠️ *{c.get('alias')}* ya está en uso por *{owner}*.")
+    for a in name_clashes:
+        lines.append(f"⚠️ *{a}* ya es un participante, no lo puedo usar de apodo.")
+    if not lines:
+        lines.append(f"Ya tenía esos apodos anotados para *{canonical['name']}*.")
+    return "\n".join(lines)
 
 
 def _format_balances(data: dict) -> str:

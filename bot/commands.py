@@ -28,13 +28,20 @@ HELP_TEXT = (
     "• `resumen` — ver cuánto puso y cuánto gastó cada uno\n"
     "• `deshacer` — borrar tu último gasto\n"
     "• `/cotizacion oficial|blue|mep` — fijar qué dólar usar para ARS\n"
+    "• 🎙️ *Audios*: podés mandarme una nota de voz para cualquiera de estas cosas "
+    "(contar un gasto, decirme *sí*/*no*, corregir citando). Te muestro lo que escuché "
+    "antes de guardar nada. Los comandos con barra (`/soy`, `/apodo`) mejor escribilos.\n"
     "• `ayuda` — este mensaje"
 )
 
 
 def detect_command(text: str) -> str | None:
     """Return a command keyword if the text is a command, else None."""
-    t = text.strip().lower()
+    # Strip trailing punctuation before the exact matches below: a transcribed
+    # voice note arrives as "saldo." and would otherwise miss every tuple, fall
+    # through to the LLM, and come back as the useless "¿Querías un comando?".
+    # (_classify_reply already does this per word; detect_command didn't.)
+    t = text.strip().lower().rstrip(".,!¡¿?;:")
     if t.startswith(("/soy", "/iam")):
         return "soy"
     if t.startswith(("/apodo", "/apodos", "/alias")):

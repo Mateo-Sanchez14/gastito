@@ -7,6 +7,7 @@ Runs in a background task (sync httpx is fine there).
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import date
 
@@ -15,6 +16,7 @@ from commands import detect_command, handle_command
 from config import settings
 from fx.provider import ConversionError, convert
 from llm.extractor import extract, extract_edit, roast_joke
+from llm.transcriber import transcribe
 from util import format_money, match_participant, normalize_name
 from web_client import WebClient
 from whatsapp.channel import InboundGroupMessage, parse_group_message
@@ -43,12 +45,33 @@ def _addressed(name: str, body: str) -> str:
     return f"{first}, {body}" if first else body
 
 
+_HEARD_MAX_CHARS = 300
+
+
+def _heard_prefix(msg: InboundGroupMessage) -> str:
+    """Echo what we transcribed, once, above whatever we're about to say.
+
+    NOT decoration: Gemini can hallucinate words out of a noisy or near-silent
+    audio, so together with the existing confirm-before-save gate this echo is the
+    mechanism that lets a member catch a mis-hear before anything is written.
+    Empty for typed messages, so every caller can add it unconditionally.
+    """
+    heard = " ".join((msg.transcript or "").split())  # collapse newlines to one line
+    if not heard:
+        return ""
+    if len(heard) > _HEARD_MAX_CHARS:
+        heard = heard[: _HEARD_MAX_CHARS - 1].rstrip() + "…"
+    return f"🎙️ Escuché: «{heard}»\n\n"
+
+
 def _reply(msg: InboundGroupMessage, body: str) -> str | None:
     """Answer the member who wrote ``msg``: name them AND quote their message,
     so several people loading expenses at once stay untangled — each prompt is
     visibly threaded to the person it's for. Returns the sent message id."""
     return gowa.send_text(
-        msg.chat_id, _addressed(msg.sender_name, body), reply_to=msg.message_id
+        msg.chat_id,
+        _heard_prefix(msg) + _addressed(msg.sender_name, body),
+        reply_to=msg.message_id,
     )
 
 
@@ -72,11 +95,34 @@ def _process(payload: dict) -> None:
 
     group_id = link["groupId"]
     text = (msg.text or "").strip()
+
+    # Voice notes: transcribe and use the transcript AS the message text, so every
+    # route below (comandos, edición citando, sí/no, gasto nuevo) works unchanged.
+    #
+    # Placed here on purpose: AFTER get_link, because the bot's number may sit in
+    # unrelated groups and we must neither pay for nor ship their audio to Google;
+    # and BEFORE the routing and the pending lookup, so a failed transcription
+    # returns without ever touching someone's in-flight proposal.
+    paused = False
+    if not text and msg.audio_path:
+        gowa.send_chat_presence(msg.chat_id, "start")  # transcribing takes a beat
+        paused = True
+        text = _transcribe_voice_note(msg, group_id)  # replies on failure, returns ""
+        if not text:
+            return
+        # _handle_pending and _maybe_roast both re-read msg.text, so a voice "sí"
+        # only classifies if we write it back onto the message itself.
+        msg.text = text
+        msg.transcript = text
+        gowa.react(msg.chat_id, msg.message_id, "👂")  # "te escuché", even if it's chitchat
+
     if not text:
         return
 
     # Small human-cadence pause before acting: show "typing…" then wait briefly.
-    if settings.reply_delay_seconds > 0:
+    # Skipped for voice — the transcription already was the pause, and the typing
+    # indicator is already up.
+    if settings.reply_delay_seconds > 0 and not paused:
         gowa.send_chat_presence(msg.chat_id, "start")
         time.sleep(settings.reply_delay_seconds)
 
@@ -91,7 +137,11 @@ def _process(payload: dict) -> None:
     if command:
         reply = handle_command(command, text, msg, link, sender_pid, web)
         if reply:
-            gowa.send_text(msg.chat_id, reply)
+            # Not _reply(): command answers are group-wide (a balances table isn't
+            # addressed to one person), so they stay un-named and un-quoted. But a
+            # spoken "saldo" still needs the 🎙️ echo, or you can't tell what the
+            # bot thought you said. No-op for typed commands.
+            gowa.send_text(msg.chat_id, _heard_prefix(msg) + reply)
         return
 
     # Edit path: is this a reply that quotes a known expense? If so, treat the
@@ -190,6 +240,111 @@ def _process(payload: dict) -> None:
 
     # Ask for confirmation before saving anything.
     _present_confirmation(msg, expense_payload, display)
+
+
+# --- voice notes -----------------------------------------------------------
+
+# Rate-limit the "no puedo escuchar audios" notice: a group that lives on voice
+# notes would otherwise get that line 40 times a day. Same idiom as pending.py.
+_NOTICE_TTL_SECONDS = 3600
+_notice_lock = threading.Lock()
+_last_notice: dict[str, float] = {}
+
+
+def _notice_once(chat_id: str) -> bool:
+    """True at most once per hour per chat (so we warn, but don't nag)."""
+    now = time.monotonic()
+    with _notice_lock:
+        last = _last_notice.get(chat_id, 0.0)
+        if now - last < _NOTICE_TTL_SECONDS:
+            return False
+        _last_notice[chat_id] = now
+        return True
+
+
+def _voice_vocabulary(group_id: str) -> list[str]:
+    """Participant names + their apodos, as an ASR vocabulary hint. The apodos are
+    exactly the words speech recognition mangles, and they're load-bearing for
+    ``match_participant``."""
+    try:
+        participants = web.get_participants(group_id)["participants"]
+    except Exception:
+        logger.warning("Could not load participants for the voice vocabulary", exc_info=True)
+        return []
+    vocab: list[str] = []
+    for p in participants:
+        vocab.append(p["name"])
+        vocab.extend(a for a in (p.get("aliases") or []) if a)
+    return vocab
+
+
+def _transcribe_voice_note(msg: InboundGroupMessage, group_id: str) -> str:
+    """Transcribe ``msg``'s audio, or reply with the reason and return "".
+
+    Every failure path replies: a voice note is a deliberate act, and silence is
+    indistinguishable from a dead bot. None of them carry the 🎙️ prefix, because
+    ``msg.transcript`` is only set once we actually have a transcript.
+    """
+    if not settings.voice_notes_enabled or not settings.gemini_api_key:
+        logger.warning(
+            "Voice note dropped: %s",
+            "VOICE_NOTES_ENABLED=false" if not settings.voice_notes_enabled
+            else "GEMINI_API_KEY not set",
+        )
+        if _notice_once(msg.chat_id):
+            _reply(msg, "🎙️ Todavía no puedo escuchar audios. Contámelo por texto y lo cargo igual.")
+        return ""
+
+    if not msg.audio_mime:
+        _reply(msg, "🎙️ No pude leer ese formato de audio 😞. Contámelo por texto.")
+        return ""
+
+    # Duration is the better cost proxy when Gowa reports it (a forwarded 4-minute
+    # song is not a voice note); bytes are the backstop when it doesn't.
+    if msg.audio_seconds and msg.audio_seconds > settings.voice_max_seconds:
+        logger.info("Voice note too long: %ss", msg.audio_seconds)
+        _reply(
+            msg,
+            "🎙️ Ese audio es muy largo para mí 😅. Mandame uno más cortito "
+            "o contámelo por texto.",
+        )
+        return ""
+
+    started = time.monotonic()
+    audio = gowa.fetch_media(msg.audio_path, settings.voice_max_bytes)
+    if audio is None:
+        # The webhook path may be stale (media lives in gowa's container layer);
+        # ask Gowa to resolve/re-download it before giving up.
+        ref = gowa.resolve_media_ref(msg.message_id, msg.chat_id)
+        if ref:
+            audio = gowa.fetch_media(ref[0], settings.voice_max_bytes)
+    if not audio:
+        _reply(
+            msg,
+            "🎙️ No pude descargar tu audio 😞. ¿Me lo mandás de nuevo o me lo contás por texto?",
+        )
+        return ""
+
+    try:
+        result = transcribe(audio, msg.audio_mime, _voice_vocabulary(group_id))
+    except Exception:
+        logger.exception("Gemini transcription failed (%s bytes, %s)", len(audio), msg.audio_mime)
+        _reply(msg, "🎙️ No pude escuchar tu audio ahora ⚠️. Probá de nuevo en un rato.")
+        return ""
+
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    # One line per voice note: in prod this is the entire debugging surface.
+    logger.info(
+        "Transcribed voice note: %s bytes, %s, ptt=%s, %sms, has_speech=%s, text=%r",
+        len(audio), msg.audio_mime, msg.is_voice_note, elapsed_ms,
+        result.has_speech if result else None,
+        result.transcript if result else None,
+    )
+
+    if not result or not result.has_speech or not result.transcript:
+        _reply(msg, "🎙️ Escuché el audio pero no entendí nada 😅. ¿Lo repetís un poco más claro?")
+        return ""
+    return result.transcript
 
 
 class _ResolveError(Exception):
@@ -408,14 +563,25 @@ _AFFIRM = {
     "si", "sii", "siii", "sip", "sipi", "sisi", "dale", "ok", "oka", "okok",
     "okey", "okay", "listo", "joya", "va", "vale", "obvio", "claro", "confirmo",
     "confirmado", "correcto", "exacto", "tal", "yes", "👍", "✅", "🆗", "🙆",
+    # Spoken confirmations are wordier than typed ones.
+    "confirmalo", "confirma", "guardalo", "guarda", "registralo", "mandale",
+    "perfecto", "genial", "porfa", "porfavor", "favor", "eso",
 }
 _NEGATE = {
     "no", "nop", "nope", "nada", "cancelar", "cancela", "cancelado", "olvidalo",
     "olvidate", "borralo", "borra", "negativo", "nel", "❌", "🚫", "👎",
+    "descartalo", "descarta",
 }
 
+# A typed "sí" is 1-2 words; a spoken one is a sentence ("sí, dale, confirmalo por
+# favor" is five). Overshooting the cap used to mean _handle_pending returned
+# False, pending.clear() threw the proposal away, and the reprocessed message came
+# back as chitchat — i.e. the expense vanished in silence.
+_MAX_REPLY_WORDS_TEXT = 4
+_MAX_REPLY_WORDS_VOICE = 8
 
-def _classify_reply(text: str) -> str | None:
+
+def _classify_reply(text: str, max_words: int = _MAX_REPLY_WORDS_TEXT) -> str | None:
     """Classify a short reply as 'yes' / 'no' / None (anything else).
 
     Only a *leading* negate word counts as a rejection, so a correction like
@@ -424,7 +590,7 @@ def _classify_reply(text: str) -> str | None:
     """
     words = [w.strip(".,!¡¿?;:") for w in normalize_name(text).split()]
     words = [w for w in words if w]
-    if not words or len(words) > 4:
+    if not words or len(words) > max_words:
         return None
     has_no = any(w in _NEGATE for w in words)
     has_yes = any(w in _AFFIRM for w in words)
@@ -438,7 +604,8 @@ def _classify_reply(text: str) -> str | None:
 def _handle_pending(msg: InboundGroupMessage, pend: pending.Pending) -> bool:
     """React to a reply to a pending proposal. Returns True if it was consumed."""
     text = (msg.text or "").strip()
-    kind = _classify_reply(text)
+    max_words = _MAX_REPLY_WORDS_VOICE if msg.transcript else _MAX_REPLY_WORDS_TEXT
+    kind = _classify_reply(text, max_words)
 
     if pend.stage == "description":
         if kind == "no":

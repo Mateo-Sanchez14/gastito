@@ -5,6 +5,9 @@
 postgres-data/
 gowa/storages/*
 !gowa/storages/.gitkeep
+# downloaded media (voice notes, images) — never commit; purge periodically
+gowa/statics/*
+!gowa/statics/.gitkeep
 
 # python
 __pycache__/

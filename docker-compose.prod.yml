@@ -40,7 +40,14 @@ services:
       APP_BASIC_AUTH: ${GOWA_BASIC_AUTH_USER}:${GOWA_BASIC_AUTH_PASS}
       APP_DEBUG: 'false'
       DB_URI: 'file:storages/whatsapp.db?_foreign_keys=on'
+      # Load-bearing for voice notes: backs /message/:id/download, the fallback
+      # the bot uses when the webhook's media path is already gone.
       WHATSAPP_CHAT_STORAGE: 'true'
+      # Voice notes: Gowa downloads the audio and puts its path in the webhook.
+      # Set explicitly even though it's the upstream default — GOWA_IMAGE_TAG
+      # floats on `latest`, and relying on a default in an auto-updating image is
+      # how this feature silently stops working after a `docker compose pull`.
+      WHATSAPP_AUTO_DOWNLOAD_MEDIA: 'true'
       WHATSAPP_AUTO_REPLY: ''
       WHATSAPP_AUTO_MARK_READ: 'false'
       WHATSAPP_WEBHOOK: 'http://bot:8000/webhooks/gowa/'
@@ -49,6 +56,11 @@ services:
       WHATSAPP_WEBHOOK_INCLUDE_OUTGOING: 'false'
     volumes:
       - ./gowa/storages:/app/storages
+      # Downloaded media (voice notes) — without this it lives only in the
+      # container's writable layer: lost on rebuild and growing without bound,
+      # which matters on the 1GB droplet. Purge with:
+      #   find gowa/statics/media -type f -mtime +7 -delete
+      - ./gowa/statics:/app/statics
     labels:
       # Gowa pairing UI (scan QR here once). Protected by its own Basic Auth.
       caddy: ${GOWA_HOST}
@@ -68,6 +80,12 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.7}
       BOT_REPLY_DELAY_SECONDS: ${BOT_REPLY_DELAY_SECONDS:-2}
+      # Voice notes (Gemini-only — gpt-4o-mini can't hear, so no fallback).
+      VOICE_NOTES_ENABLED: ${VOICE_NOTES_ENABLED:-true}
+      GEMINI_TRANSCRIBE_MODEL: ${GEMINI_TRANSCRIBE_MODEL:-gemini-2.0-flash}
+      VOICE_TRANSCRIBE_TIMEOUT_SECONDS: ${VOICE_TRANSCRIBE_TIMEOUT_SECONDS:-90}
+      VOICE_MAX_BYTES: ${VOICE_MAX_BYTES:-8388608}
+      VOICE_MAX_SECONDS: ${VOICE_MAX_SECONDS:-120}
       WEB_INGEST_URL: 'http://web:3000/api/bot'
       BOT_INGEST_SECRET: ${BOT_INGEST_SECRET}
       GOWA_BASE_URL: 'http://gowa:4000'

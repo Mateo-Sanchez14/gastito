@@ -96,6 +96,7 @@
     "Participants": {
       "title": "群組成員",
       "description": "輸入每位成員的名稱。",
+      "away": "away",
       "protectedParticipant": "此成員已有登記支出，無法刪除。",
       "new": "新增",
       "add": "新增群組成員",

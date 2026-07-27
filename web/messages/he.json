@@ -105,6 +105,7 @@
     "Participants": {
       "title": "משתתפים",
       "description": "הזן את השם עבור כל משתתף.",
+      "away": "away",
       "protectedParticipant": "משתתף זה לקח חלק בהוצאות, ולא ניתן להסירו.",
       "new": "חדש",
       "add": "הוסף משתתף",

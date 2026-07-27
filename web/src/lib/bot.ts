@@ -80,6 +80,46 @@ export async function addAliases(
   return { added, conflicts }
 }
 
+export type SetParticipantsActiveResult = {
+  changed: { id: string; name: string }[]
+  /** already in the requested state -> the bot says "ya estaba" instead of "listo" */
+  unchanged: { id: string; name: string }[]
+}
+
+/**
+ * Flip the "presente" flag for one or more participants (the /entra and /sale
+ * commands). Nobody is ever deleted to leave the trip — Expense.paidBy cascades
+ * and would take their expenses with them — so this only changes who a default
+ * "entre todos" split covers from now on. Existing expenses and balances are
+ * untouched. Idempotent: an id already in the requested state comes back under
+ * `unchanged`.
+ */
+export async function setParticipantsActive(
+  groupId: string,
+  participantIds: string[],
+  active: boolean,
+): Promise<SetParticipantsActiveResult> {
+  const participants = await prisma.participant.findMany({
+    where: { groupId, id: { in: participantIds } },
+    select: { id: true, name: true, active: true },
+  })
+  const changed = participants
+    .filter((p) => p.active !== active)
+    .map(({ id, name }) => ({ id, name }))
+  const unchanged = participants
+    .filter((p) => p.active === active)
+    .map(({ id, name }) => ({ id, name }))
+
+  if (changed.length > 0) {
+    // groupId in the where is what keeps a stray id from another group out.
+    await prisma.participant.updateMany({
+      where: { groupId, id: { in: changed.map((p) => p.id) } },
+      data: { active },
+    })
+  }
+  return { changed, unchanged }
+}
+
 /** Resolve a WhatsApp group (chatId "...@g.us") to its linked spliit Group. */
 export async function getGroupLinkByChatId(
   chatId: string,

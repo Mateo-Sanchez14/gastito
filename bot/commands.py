@@ -7,9 +7,15 @@ text to send back to the group (or None to stay silent).
 from __future__ import annotations
 
 import logging
+import re
 
 from fx.provider import _ARS_ENDPOINTS
-from util import format_money, match_participant, normalize_name
+from util import (
+    active_participants,
+    format_money,
+    match_participant,
+    normalize_name,
+)
 from web_client import WebClient
 from whatsapp.channel import InboundGroupMessage
 
@@ -24,6 +30,10 @@ HELP_TEXT = (
     "ej. _\"eran 8000 no 800\"_ o _\"dividí entre todos menos Pichi\"_\n"
     "• `/soy <tu nombre>` — vinculá tu WhatsApp a tu nombre del grupo\n"
     "• `/apodo <apodo> = <participante>` — anotar un apodo, ej. `/apodo Tuco = Fer`\n"
+    "• `/entra <nombres>` — marcar que alguien está (entra al *dividido entre todos*)\n"
+    "• `/sale <nombres>` — marcar que alguien ya no está. No lo borra: sus gastos "
+    "y su saldo quedan igual\n"
+    "• `/quienes` — ver quién está y quién no\n"
     "• `saldo` — ver quién le debe a quién\n"
     "• `resumen` — ver cuánto puso y cuánto gastó cada uno\n"
     "• `deshacer` — borrar tu último gasto\n"
@@ -33,6 +43,10 @@ HELP_TEXT = (
     "antes de guardar nada. Los comandos con barra (`/soy`, `/apodo`) mejor escribilos.\n"
     "• `ayuda` — este mensaje"
 )
+
+
+_ENTRA_PREFIXES = ("/entra", "/entran", "/vuelve", "/vuelven")
+_SALE_PREFIXES = ("/sale", "/salen", "/se fue", "/se fueron")
 
 
 def detect_command(text: str) -> str | None:
@@ -54,6 +68,15 @@ def detect_command(text: str) -> str | None:
         return "undo"
     if t.startswith(("/cotizacion", "/cotización", "cotizacion", "cotización")):
         return "cotizacion"
+    # Presencia. The two mutating ones require the slash: a bare "entra"/"sale"
+    # shows up in ordinary chatter ("sale, dale") and a false positive here
+    # silently changes how every later expense is split.
+    if t.startswith(_ENTRA_PREFIXES):
+        return "entra"
+    if t.startswith(_SALE_PREFIXES):
+        return "sale"
+    if t in ("/quienes", "/quiénes", "quienes", "quiénes", "/presentes", "presentes"):
+        return "quienes"
     if t in ("ayuda", "help", "/ayuda", "/help"):
         return "ayuda"
     return None
@@ -88,6 +111,12 @@ def handle_command(
 
     if command == "apodo":
         return _handle_apodo(text, group_id, web)
+
+    if command in ("entra", "sale"):
+        return _handle_presencia(text, group_id, web, active=(command == "entra"))
+
+    if command == "quienes":
+        return _roster(web.get_participants(group_id)["participants"])
 
     if command == "cotizacion":
         parts = text.strip().split()
@@ -198,6 +227,127 @@ def _handle_apodo(text: str, group_id: str, web: WebClient) -> str:
     if not lines:
         lines.append(f"Ya tenía esos apodos anotados para *{canonical['name']}*.")
     return "\n".join(lines)
+
+
+_PRESENCIA_USAGE = (
+    "Para marcar quién está:\n"
+    "• `/entra Fer, Juan` — se suman al *dividido entre todos*\n"
+    "• `/sale Pichi` — deja de contar (no se borra, sus gastos quedan)\n"
+    "• `/quienes` — ver la lista"
+)
+
+# "Fer, Juan y Pichi" -> three names. \by\b so a name like "Yamila" survives.
+_NAME_SEPARATOR = re.compile(r"\s*(?:,|;|\by\b)\s*", re.IGNORECASE)
+
+
+def _strip_command(text: str, prefixes: tuple[str, ...]) -> str:
+    """Drop the command itself and return the rest. Longest prefix first, so
+    "/se fue Pichi" doesn't leave "fue" behind and try to match it as a name."""
+    t = text.strip()
+    low = t.lower()
+    for prefix in sorted(prefixes, key=len, reverse=True):
+        if low.startswith(prefix):
+            return t[len(prefix) :].strip()
+    _, _, rest = t.partition(" ")
+    return rest.strip()
+
+
+def _handle_presencia(text: str, group_id: str, web: WebClient, active: bool) -> str:
+    """`/entra <nombres>` / `/sale <nombres>` — move people in and out of the
+    "presentes" list, which is what a default "entre todos" split covers.
+
+    Nobody is ever removed from the group: on a trip the roster is fixed up
+    front and people just arrive and leave, and deleting a participant would
+    cascade and take their expenses with them.
+    """
+    prefixes = _ENTRA_PREFIXES if active else _SALE_PREFIXES
+    rest = _strip_command(text, prefixes)
+    if not rest:
+        return _PRESENCIA_USAGE
+
+    participants = web.get_participants(group_id)["participants"]
+
+    targets: list[dict] = []
+    unknown: list[str] = []
+    for raw in _NAME_SEPARATOR.split(rest):
+        name = raw.strip()
+        if not name:
+            continue
+        p = match_participant(name, participants)
+        if not p:
+            unknown.append(name)
+        elif all(t["id"] != p["id"] for t in targets):
+            targets.append(p)
+
+    if not targets:
+        names = ", ".join(p["name"] for p in participants)
+        return (
+            f"❓ No reconozco a *{', '.join(unknown)}* en el grupo.\n"
+            f"Participantes: {names}"
+        )
+
+    changed = [p for p in targets if bool(p.get("active", True)) != active]
+    already = [p for p in targets if bool(p.get("active", True)) == active]
+
+    if changed:
+        try:
+            web.set_participants_active(group_id, [p["id"] for p in changed], active)
+        except Exception:
+            logger.exception("set_participants_active failed")
+            return "No pude actualizar la lista 😞. Probá de nuevo."
+        for p in changed:
+            p["active"] = active  # keep the local snapshot in sync for the roster
+
+    lines: list[str] = []
+    if changed:
+        who = ", ".join(p["name"] for p in changed)
+        if active:
+            verb = "está" if len(changed) == 1 else "están"
+            lines.append(f"✅ Ahora también {verb}: *{who}*.")
+        else:
+            verb = "ya no está" if len(changed) == 1 else "ya no están"
+            lines.append(
+                f"👋 Anotado, *{who}* {verb}. Sus gastos y su saldo quedan igual."
+            )
+    if already:
+        who = ", ".join(p["name"] for p in already)
+        plural = "" if len(already) == 1 else "n"
+        state = "ya estaba" if active else "ya no estaba"
+        lines.append(f"ℹ️ *{who}* {state}{plural}.")
+    for u in unknown:
+        lines.append(f"⚠️ A *{u}* no lo reconozco en el grupo, lo salteé.")
+
+    lines.append(_roster(participants))
+    if not active_participants(participants):
+        lines.append(
+            "⚠️ Así no queda nadie presente: los gastos \"entre todos\" van a "
+            "fallar hasta que uses `/entra`."
+        )
+    return "\n".join(lines)
+
+
+def _roster(participants: list[dict]) -> str:
+    """Who's on the trip right now. Sent on its own (`/quienes`) and appended to
+    every /entra and /sale, so the group always sees the resulting default."""
+    active = active_participants(participants)
+    active_ids = {p["id"] for p in active}
+    away = [p for p in participants if p["id"] not in active_ids]
+
+    if not participants:
+        return "El grupo no tiene participantes todavía."
+    if not active:
+        return f"😴 No está nadie: {', '.join(p['name'] for p in away)}"
+    if not away:
+        return (
+            f"👥 Están todos ({len(active)}): "
+            + ", ".join(p["name"] for p in active)
+        )
+    return (
+        f"👥 *Presentes ({len(active)}):* "
+        + ", ".join(p["name"] for p in active)
+        + f"\n😴 *No están ({len(away)}):* "
+        + ", ".join(p["name"] for p in away)
+    )
 
 
 def _format_balances(data: dict) -> str:

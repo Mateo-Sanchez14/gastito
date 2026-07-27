@@ -105,6 +105,7 @@
     "Participants": {
       "title": "Participantes",
       "description": "Introduz o nome de cada participante.",
+      "away": "away",
       "protectedParticipant": "Este participante faz parte de despesas e não pode ser removido.",
       "new": "Novo",
       "add": "Adicionar participante",

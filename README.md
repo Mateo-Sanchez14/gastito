@@ -62,6 +62,9 @@ WhatsApp grupo
 |---|---|
 | `/soy <nombre>` | Vincula tu WhatsApp a tu participante del grupo |
 | `/apodo <apodo> = <participante>` | Anota un apodo, ej. `/apodo Tuco = Fer` (o varios: `/apodo Fer = Fernando, Tuco, Tuquina`) |
+| `/entra <nombres>` | Marca que alguien está, ej. `/entra Fer, Juan` |
+| `/sale <nombres>` | Marca que alguien ya no está (no lo borra) |
+| `/quienes` | Muestra quién está y quién no |
 | `saldo` | Muestra quién le debe a quién |
 | `resumen` | Cuánto puso y cuánto gastó cada uno (+ saldo neto) |
 | `deshacer` | Borra tu último gasto |
@@ -79,6 +82,31 @@ puede repetirse entre personas ni coincidir con el nombre real de otro participa
 
 > Nota: _"yo"_, _"mí"_, _"conmigo"_ se refieren a quien escribe. Si contás _"gasto
 > entre Benja, Fer y yo"_, el split te incluye a vos automáticamente.
+
+### Quiénes están
+
+En un viaje el grupo está anotado entero desde el día uno, pero la gente llega y
+se va en distintos momentos. Por eso, además de la lista de participantes, hay una
+lista de **presentes**: es a quiénes alcanza un gasto _"entre todos"_.
+
+```
+/sale Pichi          → Pichi deja de contar en el "entre todos"
+/entra Fer, Juan     → se suman (también sirve "/entra Fer y Juan")
+/quienes             → ver la lista
+```
+
+Dos cosas importantes:
+
+- **`/sale` no borra a nadie.** El participante sigue en el grupo con todos sus
+  gastos y su saldo intactos, y sigue apareciendo en `saldo` y en `resumen`.
+  (Borrarlo de verdad desde la web sí se lleva puestos los gastos que pagó.)
+- **Nombrar a alguien siempre funciona**, esté o no. _"pagó Pichi"_ o _"entre Fer
+  y Pichi"_ se registran igual aunque Pichi esté marcado como que no está —
+  alguien que ya se volvió puede haber puesto plata igual.
+
+El flag no es retroactivo: cada gasto congela entre quiénes se dividió en el
+momento en que se cargó. En la config del grupo en la web, los que no están
+figuran con un _"no está"_ al lado (se cambia solo por WhatsApp).
 
 ### Registrar un gasto (con confirmación)
 

@@ -105,6 +105,7 @@
     "Participants": {
       "title": "Peserta",
       "description": "Masukkan nama untuk setiap peserta.",
+      "away": "away",
       "protectedParticipant": "Peserta ini adalah bagian dari pengeluaran, dan tidak dapat dihapus.",
       "new": "Baru",
       "add": "Tambahkan peserta",

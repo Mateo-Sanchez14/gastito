@@ -46,6 +46,17 @@ def match_participant(name: str, participants: list[dict]) -> dict | None:
     return None
 
 
+def active_participants(participants: list[dict]) -> list[dict]:
+    """The "presentes": who a default "entre todos" split covers.
+
+    Everyone stays in the group forever (deleting a participant would cascade
+    and take their expenses with them); the ones who left the trip are just
+    switched off. A participant without the field is treated as active, so a
+    bot running against an older web deploy behaves exactly like before.
+    """
+    return [p for p in participants if p.get("active", True)]
+
+
 def format_money(cents: int, symbol: str = "$") -> str:
     """Format integer cents as a money string, e.g. 1250 -> '$12.50'."""
     return f"{symbol}{cents / 100:,.2f}"

@@ -105,6 +105,7 @@
     "Participants": {
       "title": "Kideak",
       "description": "Sartu kide bakoitzaren izena.",
+      "away": "away",
       "protectedParticipant": "Kide hauek gastuak dituzte eta ezin dira ezabatu.",
       "new": "Berria",
       "add": "Gehitu kidea",

@@ -99,6 +99,7 @@
     "Participants": {
       "title": "Partecipanti",
       "description": "Immettere il nome per ciascun partecipante.",
+      "away": "away",
       "protectedParticipant": "Questo partecipante fa parte delle spese e non può essere rimosso.",
       "new": "Nuovo",
       "add": "Aggiungi partecipante",

@@ -96,6 +96,7 @@
     "Participants": {
       "title": "Osallistujat",
       "description": "Syötä jokaisen osallistujan nimi.",
+      "away": "away",
       "protectedParticipant": "Tätä osallistujaa ei voida poistaa, koska hän osallistuu kuluihin.",
       "add": "Lisää osallistuja",
       "new": "Uusi",

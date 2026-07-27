@@ -99,6 +99,7 @@
     "Participants": {
       "title": "群组成员",
       "description": "输入每位成员的名字。",
+      "away": "away",
       "protectedParticipant": "群组成员是消费的一部分，不可删除。",
       "new": "新建",
       "add": "添加群组成员",

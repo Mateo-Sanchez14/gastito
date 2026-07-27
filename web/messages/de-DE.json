@@ -99,6 +99,7 @@
     "Participants": {
       "title": "Mitglieder",
       "description": "Füge einen Namen für jedes Gruppenmitglied hinzu.",
+      "away": "away",
       "protectedParticipant": "Dieses Mitglied ist Teil der Ausgaben und kann nicht entfernt werden.",
       "new": "Neu",
       "add": "Mitglied hinzufügen",

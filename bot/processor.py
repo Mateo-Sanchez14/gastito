@@ -17,7 +17,12 @@ from config import settings
 from fx.provider import ConversionError, convert
 from llm.extractor import extract, extract_edit, roast_joke
 from llm.transcriber import transcribe
-from util import format_money, match_participant, normalize_name
+from util import (
+    active_participants,
+    format_money,
+    match_participant,
+    normalize_name,
+)
 from web_client import WebClient
 from whatsapp.channel import InboundGroupMessage, parse_group_message
 from whatsapp.gowa_client import GowaClient
@@ -373,8 +378,11 @@ def _resolve_expense_fields(
     if not paid_by_id:
         raise _ResolveError("¿Quién pagó este gasto?")
 
-    # Who it's split among (empty = everyone).
+    # Who it's split among (empty = everyone who's currently on the trip).
     if extraction.paid_for_names:
+        # Names are matched against the FULL roster, not just the active subset:
+        # someone who already left (or hasn't arrived) can still have fronted
+        # money or owe a share, and naming them explicitly must keep working.
         paid_for = []
         for name in extraction.paid_for_names:
             p = match_participant(name, participants)
@@ -382,7 +390,14 @@ def _resolve_expense_fields(
                 raise _ResolveError(f"No reconozco a *{name}* en el grupo.")
             paid_for.append(p)
     else:
-        paid_for = participants
+        paid_for = active_participants(participants)
+        if not paid_for:
+            # Better to stop than to silently split among the whole group when
+            # the sender believes only a few are around. Recoverable: /entra.
+            raise _ResolveError(
+                "No hay nadie marcado como presente 🤔. Usá `/entra <nombres>` "
+                "o decime entre quiénes lo divido."
+            )
 
     # Currency conversion to USD (group currency).
     currency = (extraction.currency or "USD").upper()
@@ -649,11 +664,25 @@ def _confirm_and_save(msg: InboundGroupMessage, pend: pending.Pending) -> None:
     gowa.react(msg.chat_id, msg.message_id, "✅")
 
 
+def _among_label(paid_for: list[dict], participants: list[dict]) -> str:
+    """How the split reads in the preview and the confirmation.
+
+    Telling "todos" apart from "the whole group including whoever left" is not
+    cosmetic: the preview is the last chance to catch a wrong split before it's
+    saved, so it has to be obvious whether an absent member is in or out.
+    """
+    ids = {p["id"] for p in paid_for}
+    if ids == {p["id"] for p in active_participants(participants)}:
+        return "todos"
+    if ids == {p["id"] for p in participants}:
+        return "todos (incluidos los que no están)"
+    return ", ".join(p["name"] for p in paid_for)
+
+
 def _build_display(extraction, resolved: dict, participants: list[dict]) -> dict:
     """Snapshot the fields needed to render the confirmation preview later."""
     name_by_id = {p["id"]: p["name"] for p in participants}
-    everyone = len(resolved["paid_for"]) == len(participants)
-    among = "todos" if everyone else ", ".join(p["name"] for p in resolved["paid_for"])
+    among = _among_label(resolved["paid_for"], participants)
     return {
         "title": (extraction.title or "").strip(),
         "usd_cents": resolved["usd_cents"],
@@ -692,8 +721,7 @@ def _confirmation(
 ) -> str:
     name_by_id = {p["id"]: p["name"] for p in participants}
     payer = name_by_id.get(paid_by_id, "alguien")
-    everyone = len(paid_for) == len(participants)
-    among = "todos" if everyone else ", ".join(p["name"] for p in paid_for)
+    among = _among_label(paid_for, participants)
     title = extraction.title or "Gasto"
 
     line = f"{'✏️ Actualizado:' if edited else '✅'} {format_money(usd_cents)} — {title}"

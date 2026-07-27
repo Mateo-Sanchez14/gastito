@@ -87,6 +87,13 @@ export function GroupForm({
     keyName: 'key',
   })
 
+  // gastito: who's currently on the trip. Read-only here — it's set from
+  // WhatsApp with /entra and /sale — so it comes from the server data, not from
+  // the form state, and never reaches the submitted values.
+  const awayParticipantIds = new Set(
+    (group?.participants ?? []).filter((p) => !p.active).map((p) => p.id),
+  )
+
   const [activeUser, setActiveUser] = useState<string | null>(null)
   useEffect(() => {
     if (activeUser === null) {
@@ -257,6 +264,11 @@ export function GroupForm({
                               {...field}
                               placeholder={t('Participants.new')}
                             />
+                            {item.id && awayParticipantIds.has(item.id) && (
+                              <span className="self-center shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                                {t('Participants.away')}
+                              </span>
+                            )}
                             {item.id &&
                             protectedParticipantIds.includes(item.id) ? (
                               <HoverCard>

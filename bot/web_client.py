@@ -81,6 +81,23 @@ class WebClient:
         resp.raise_for_status()
         return resp.json()
 
+    def set_participants_active(
+        self, group_id: str, participant_ids: list[str], active: bool
+    ) -> dict:
+        """Mark participants present/absent (/entra, /sale). Nobody is deleted:
+        this only moves them in or out of the default "entre todos" split.
+        Returns {added, unchanged}-style {changed, unchanged}."""
+        resp = self._patch(
+            f"/groups/{group_id}/participants",
+            {"participantIds": participant_ids, "active": active},
+        )
+        if resp.status_code >= 400:
+            logger.error(
+                "set_participants_active failed (%s): %s", resp.status_code, resp.text
+            )
+            resp.raise_for_status()
+        return resp.json()
+
     # --- aliases (apodos) --------------------------------------------------
     def add_aliases(self, group_id: str, participant_id: str, aliases: list[str]) -> dict:
         """Attach nickname(s) to a participant. Returns {added, conflicts}."""

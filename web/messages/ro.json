@@ -96,6 +96,7 @@
     "Participants": {
       "title": "Membri",
       "description": "Adaugă numele fiecărui membru.",
+      "away": "away",
       "protectedParticipant": "Acest membru a luat parte la cheltuieli și nu poate să fie șters.",
       "new": "Nou",
       "add": "Adaugă membru",

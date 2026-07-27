@@ -96,6 +96,7 @@
     "Participants": {
       "title": "Katılımcılar",
       "description": "Her katılımcı için bir ad girin.",
+      "away": "away",
       "protectedParticipant": "Bu katılımcı masraflara dahil olduğundan kaldırılamaz.",
       "new": "Yeni",
       "add": "Katılımcı ekle",

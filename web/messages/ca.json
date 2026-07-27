@@ -99,6 +99,7 @@
     "Participants": {
       "title": "Participants",
       "description": "Afegeix el nom de totes les participants.",
+      "away": "away",
       "protectedParticipant": "Aquestes participants ténen despeses al seu nom i no poden ser esborrades.",
       "new": "Nou",
       "add": "Afegir participants",

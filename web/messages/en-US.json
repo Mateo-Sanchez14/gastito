@@ -105,6 +105,7 @@
     "Participants": {
       "title": "Participants",
       "description": "Enter the name for each participant.",
+      "away": "away",
       "protectedParticipant": "This participant is part of expenses, and can not be removed.",
       "new": "New",
       "add": "Add participant",

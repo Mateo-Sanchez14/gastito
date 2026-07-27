@@ -47,9 +47,13 @@ Reglas:
   a la persona indicada en "Quien escribe". Si el mensaje divide el gasto e incluye a quien escribe
   (ej. "entre Benja, Fer y yo"), AGREGÁ su nombre a paid_for_names. Nunca lo omitas.
 - paid_by_name: si no se aclara quién pagó, dejalo vacío (el sistema asume que pagó quien escribe).
-- paid_for_names: si dice "entre todos" o no aclara, dejá la lista vacía (= todos). Si nombra
+- paid_for_names: si dice "entre todos", "entre los que estamos", "como siempre" o no aclara,
+  dejá la lista VACÍA. No la expandas vos: el sistema ya sabe quiénes están. Si nombra
   personas, ponelas TODAS (incluí a quien escribe cuando corresponda, ver regla de primera persona).
   Matcheá nombres sin distinguir mayúsculas/acentos contra la lista provista.
+- PRESENCIA: un participante marcado "[no está]" sigue anotado en el grupo pero no está
+  presente ahora. Cuando tengas que ENUMERAR (ej. "todos menos Pichi"), NO lo incluyas.
+  Sí incluilo si el mensaje lo nombra explícitamente (pudo poner plata igual).
 - APODOS: a cada participante le pueden figurar apodos entre paréntesis, "(apodos: ...)". Un apodo
   refiere al MISMO participante; devolvé SIEMPRE el nombre canónico (el de antes del paréntesis),
   nunca el apodo. Ej: con "Fer (apodos: Fernando, Tuco)", tanto "Tuco" como "Fernando" -> "Fer".
@@ -66,15 +70,18 @@ Reglas:
 
 def _format_participants(participants: list[dict]) -> str:
     """Render participants for the prompt, appending each one's apodos so the
-    model can map a nickname back to the canonical name. e.g.
-    "Fer (apodos: Fernando, Tuco), Benja"."""
+    model can map a nickname back to the canonical name, plus a "[no está]" mark
+    for whoever isn't currently on the trip. e.g.
+    "Fer (apodos: Fernando, Tuco), Benja [no está]"."""
     parts: list[str] = []
     for p in participants:
+        label = p["name"]
         aliases = [a for a in (p.get("aliases") or []) if a]
         if aliases:
-            parts.append(f"{p['name']} (apodos: {', '.join(aliases)})")
-        else:
-            parts.append(p["name"])
+            label += f" (apodos: {', '.join(aliases)})"
+        if not p.get("active", True):
+            label += " [no está]"
+        parts.append(label)
     return ", ".join(parts) or "(ninguno)"
 
 
@@ -112,8 +119,12 @@ Reglas:
   "1,5 lucas" = 1500; "0,5 gambas" = 50.
 - paid_for_names: si el usuario cambia entre quiénes se divide ("dividí entre todos menos X",
   "solo entre A y B"), calculá la NUEVA lista completa de nombres a partir de los participantes.
-  Si no toca la división, copiá la lista actual. Lista vacía = todos. "yo"/"mí"/"conmigo" se
-  refieren a quien escribe (dato "Quien escribe"): incluí su nombre si el cambio lo abarca.
+  Si no toca la división, copiá la lista actual. Lista vacía = todos los que están.
+  "yo"/"mí"/"conmigo" se refieren a quien escribe (dato "Quien escribe"): incluí su nombre
+  si el cambio lo abarca.
+- PRESENCIA: un participante marcado "[no está]" sigue anotado en el grupo pero no está
+  presente ahora. Cuando tengas que ENUMERAR (ej. "todos menos Pichi"), NO lo incluyas.
+  Sí incluilo si el mensaje lo nombra explícitamente.
 - APODOS: a los participantes les pueden figurar apodos entre paréntesis "(apodos: ...)". Un apodo
   refiere al MISMO participante; devolvé SIEMPRE el nombre canónico, nunca el apodo.
 - paid_by_name: si cambia quién pagó, ponelo; si no, copiá el actual.

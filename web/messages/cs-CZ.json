@@ -97,6 +97,7 @@
     "Participants": {
       "title": "Účastníci",
       "description": "Zadejte jméno každého účastníka.",
+      "away": "away",
       "protectedParticipant": "Tento účastník je součástí výdajů a nelze jej odebrat.",
       "new": "Nový",
       "add": "Přidat účastníka",

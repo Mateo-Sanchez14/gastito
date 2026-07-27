@@ -27,6 +27,11 @@ model Group {
 model Participant {
   id              String             @id
   name            String
+  // gastito: "presente" — who a default "entre todos" split covers. Deleting a
+  // participant is not an option (Expense.paidBy cascades and would take their
+  // expenses with them), so someone who leaves the trip is switched off here
+  // and keeps every expense and balance they already have.
+  active          Boolean            @default(true)
   group           Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
   groupId         String
   expensesPaidBy  Expense[]

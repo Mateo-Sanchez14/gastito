@@ -99,6 +99,7 @@
     "Participants": {
       "title": "Deelnemers",
       "description": "Voer de naam in van de deelnemers in de groep.",
+      "away": "away",
       "protectedParticipant": "Deze deelnemer maakt deel uit van de uitgaven en kan niet worden verwijderd.",
       "new": "Nieuwe deelnemer",
       "add": "Voeg deelnemer toe",

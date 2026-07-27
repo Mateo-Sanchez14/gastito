@@ -99,6 +99,7 @@
     "Participants": {
       "title": "参加者",
       "description": "各参加者の名前を入力してください。",
+      "away": "away",
       "protectedParticipant": "この参加者は支出の一部であり、削除できません。",
       "new": "新規",
       "add": "参加者を追加",

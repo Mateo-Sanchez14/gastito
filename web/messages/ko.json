@@ -80,6 +80,7 @@
     "Participants": {
       "title": "참여자",
       "description": "참가자 이름을 하나씩 입력해 주세요.",
+      "away": "away",
       "protectedParticipant": "이 참가자는 지출에 참여 중이라서 지울 수 없어요.",
       "add": "참가자 추가하기",
       "John": "민수",

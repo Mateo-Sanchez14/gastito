@@ -97,6 +97,7 @@
     "Participants": {
       "title": "Członkowie",
       "description": "Podaj nazwę dla każdego członka.",
+      "away": "away",
       "protectedParticipant": "Ten członek wciąż bierze udział w rozliczeniach i nie może być usunięty.",
       "new": "Nowy",
       "add": "Dodaj członka",

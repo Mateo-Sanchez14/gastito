@@ -36,6 +36,8 @@ Reglas:
 - Slang de plata a dígitos completos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000,
   15k = 15000); "palo"/"palos" = millones (2 palos = 2000000); "gamba" = 100;
   "mango"/"pesos" = ARS.
+- La jerga puede venir con decimal (típico de una nota de voz transcripta): "2,5 palos"
+  = 2500000; "0,5 palos" = 500000; "1,5 lucas" = 1500; "0,5 gambas" = 50.
 - Notación: en español/argentino el PUNTO es separador de miles (1.500 = 1500) y la COMA es
   decimal (12,5 = 12.5). amount va en unidades mayores de la moneda (15000 para 15.000 ARS,
   12.5 para US$12,50).
@@ -106,6 +108,8 @@ Reglas:
   dígitos. "8000" es 8000 (NO 8). amount va en unidades mayores de la moneda.
 - Slang de plata a dígitos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000); "palo"/"palos"
   = millones; "gamba" = 100; "mango"/"pesos" = ARS. PUNTO = miles (1.500=1500), COMA = decimal.
+- La jerga puede venir con decimal: "2,5 palos" = 2500000; "0,5 palos" = 500000;
+  "1,5 lucas" = 1500; "0,5 gambas" = 50.
 - paid_for_names: si el usuario cambia entre quiénes se divide ("dividí entre todos menos X",
   "solo entre A y B"), calculá la NUEVA lista completa de nombres a partir de los participantes.
   Si no toca la división, copiá la lista actual. Lista vacía = todos. "yo"/"mí"/"conmigo" se

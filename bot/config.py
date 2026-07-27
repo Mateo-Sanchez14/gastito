@@ -28,6 +28,17 @@ class Settings:
     gemini_model: str
     confidence_threshold: float
 
+    # Voice notes (WhatsApp audio -> transcript -> the normal text pipeline).
+    # Gemini-only: GitHub Models' gpt-4o-mini can't hear, so unlike extraction
+    # there is NO fallback provider here. `voice_notes_enabled` is a kill switch
+    # separate from `gemini_api_key` on purpose — that key is also the extractor's
+    # fallback, so you can't turn voice off by clearing it.
+    voice_notes_enabled: bool
+    gemini_transcribe_model: str
+    voice_transcribe_timeout: float
+    voice_max_bytes: int
+    voice_max_seconds: int
+
     # Small human-cadence pause before the bot acts/replies (seconds).
     reply_delay_seconds: float
 
@@ -65,6 +76,17 @@ def load_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         confidence_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),
+        voice_notes_enabled=os.getenv("VOICE_NOTES_ENABLED", "true").lower()
+        in ("1", "true", "yes", "on"),
+        # Deliberately NOT settings.gemini_model: that one is the extractor's
+        # fallback model. Pointing it at a text-only model shouldn't silently
+        # break transcription.
+        gemini_transcribe_model=os.getenv("GEMINI_TRANSCRIBE_MODEL", "gemini-2.0-flash"),
+        # Audio is much slower than text; the extractor's 30s would time out on a
+        # long voice note.
+        voice_transcribe_timeout=float(os.getenv("VOICE_TRANSCRIBE_TIMEOUT_SECONDS", "90")),
+        voice_max_bytes=int(os.getenv("VOICE_MAX_BYTES", str(8 * 1024 * 1024))),
+        voice_max_seconds=int(os.getenv("VOICE_MAX_SECONDS", "120")),
         reply_delay_seconds=float(os.getenv("BOT_REPLY_DELAY_SECONDS", "2")),
         joke_target_name=os.getenv("JOKE_TARGET_NAME", "Benja"),
         joke_roasts_enabled=os.getenv("JOKE_ROASTS_ENABLED", "true").lower()

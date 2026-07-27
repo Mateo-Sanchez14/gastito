@@ -33,6 +33,25 @@ class RoastResult(BaseModel):
     roast: Optional[str] = None
 
 
+class Transcription(BaseModel):
+    """A WhatsApp voice note turned into text.
+
+    ``has_speech`` exists so the bot can say "escuché pero no entendí nada"
+    instead of inferring it from an empty string — and so a near-silent audio is
+    reported as silence rather than hallucinated into a plausible expense.
+    """
+
+    has_speech: bool = False
+    transcript: str = ""
+
+
+TRANSCRIBE_JSON_INSTRUCTION = """\
+Respondé ÚNICAMENTE con un objeto JSON (sin texto alrededor, sin markdown) con estas claves:
+- has_speech: boolean (false si no hay habla inteligible: silencio, ruido, música, una tos)
+- transcript: string (la transcripción; "" si has_speech es false)
+"""
+
+
 ROAST_JSON_INSTRUCTION = """\
 Respondé ÚNICAMENTE con un objeto JSON (sin texto alrededor, sin markdown) con estas claves:
 - is_joke: boolean (true solo si el mensaje es un chiste, joda o cargada; false si es serio)

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal, Optional, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 SplitMode = Literal["EVENLY", "BY_SHARES", "BY_PERCENTAGE", "BY_AMOUNT"]
 MessageType = Literal["expense", "command", "chitchat"]
@@ -24,6 +24,22 @@ class ExpenseExtraction(BaseModel):
     date: Optional[str] = Field(default=None, description="ISO date YYYY-MM-DD; default today")
     confidence: float = 0.0
     clarification_needed: Optional[str] = None
+
+    @field_validator("split_mode", mode="before")
+    @classmethod
+    def _tolerate_blank_split_mode(cls, value):
+        """Accept a missing/blank/unknown split_mode instead of failing the model.
+
+        On a chitchat message there is nothing to split, so gpt-4o-mini answers
+        ``"split_mode": ""`` — which isn't a valid Literal, so the whole extraction
+        raised, the provider was marked failed, and (once the Gemini fallback was
+        also down) the bot answered "Uy, no pude procesar eso 😞" to plain group
+        chatter instead of staying quiet. The processor only implements EVENLY
+        anyway, so anything we don't recognize means "no opinion".
+        """
+        if value in get_args(SplitMode):
+            return value
+        return "EVENLY"
 
 
 class RoastResult(BaseModel):

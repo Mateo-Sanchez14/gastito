@@ -74,14 +74,14 @@ def load_settings() -> Settings:
         ).rstrip("/"),
         github_models_model=os.getenv("GITHUB_MODELS_MODEL", "openai/gpt-4o-mini"),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
         confidence_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),
         voice_notes_enabled=os.getenv("VOICE_NOTES_ENABLED", "true").lower()
         in ("1", "true", "yes", "on"),
         # Deliberately NOT settings.gemini_model: that one is the extractor's
         # fallback model. Pointing it at a text-only model shouldn't silently
         # break transcription.
-        gemini_transcribe_model=os.getenv("GEMINI_TRANSCRIBE_MODEL", "gemini-2.0-flash"),
+        gemini_transcribe_model=os.getenv("GEMINI_TRANSCRIBE_MODEL", "gemini-flash-latest"),
         # Audio is much slower than text; the extractor's 30s would time out on a
         # long voice note.
         voice_transcribe_timeout=float(os.getenv("VOICE_TRANSCRIBE_TIMEOUT_SECONDS", "90")),

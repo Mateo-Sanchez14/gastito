@@ -35,14 +35,16 @@ Reglas:
   dígitos. "8000" es 8000 (NO 8). "12500" es 12500 (NO 12.5).
 - Slang de plata a dígitos completos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000,
   15k = 15000); "palo"/"palos" = millones (2 palos = 2000000); "gamba" = 100;
-  "mango"/"pesos" = ARS.
+  "mango"/"pesos" = CLP.
 - La jerga puede venir con decimal (típico de una nota de voz transcripta): "2,5 palos"
   = 2500000; "0,5 palos" = 500000; "1,5 lucas" = 1500; "0,5 gambas" = 50.
 - Notación: en español/argentino el PUNTO es separador de miles (1.500 = 1500) y la COMA es
   decimal (12,5 = 12.5). amount va en unidades mayores de la moneda (15000 para 15.000 ARS,
   12.5 para US$12,50).
-- Inferí la moneda (ISO 4217). Si el mensaje claramente es en pesos argentinos usá ARS,
-  chilenos CLP, uruguayos UYU, etc. Si dice "dólares"/"usd" o "$" sin pista de país, usá USD.
+- Inferí la moneda (ISO 4217). La moneda POR DEFECTO del grupo es CLP (pesos chilenos): si no
+  hay pista de país, si dice "pesos"/"mangos"/"lucas" o si aparece "$" a secas, usá CLP.
+  Usá ARS solo si el mensaje aclara que son pesos argentinos, UYU si son uruguayos, etc.
+  Usá USD solo si dice "dólares"/"usd"/"US$".
 - PRIMERA PERSONA = quien escribe: "yo", "mí", "conmigo", "yo también", "incluido yo" se refieren
   a la persona indicada en "Quien escribe". Si el mensaje divide el gasto e incluye a quien escribe
   (ej. "entre Benja, Fer y yo"), AGREGÁ su nombre a paid_for_names. Nunca lo omitas.
@@ -114,7 +116,7 @@ Reglas:
 - REGLA CRÍTICA DE MONTOS: transcribí el número TAL CUAL aparece, sin redondear ni quitar
   dígitos. "8000" es 8000 (NO 8). amount va en unidades mayores de la moneda.
 - Slang de plata a dígitos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000); "palo"/"palos"
-  = millones; "gamba" = 100; "mango"/"pesos" = ARS. PUNTO = miles (1.500=1500), COMA = decimal.
+  = millones; "gamba" = 100; "mango"/"pesos" = CLP (moneda por defecto del grupo). PUNTO = miles (1.500=1500), COMA = decimal.
 - La jerga puede venir con decimal: "2,5 palos" = 2500000; "0,5 palos" = 500000;
   "1,5 lucas" = 1500; "0,5 gambas" = 50.
 - paid_for_names: si el usuario cambia entre quiénes se divide ("dividí entre todos menos X",

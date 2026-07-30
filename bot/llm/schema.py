@@ -16,7 +16,9 @@ class ExpenseExtraction(BaseModel):
     amount: Optional[float] = Field(
         default=None, description="Amount in the currency's major units (e.g. 15000 ARS, 12.50 USD)"
     )
-    currency: Optional[str] = Field(default=None, description="ISO 4217 code, e.g. ARS, USD, CLP")
+    currency: Optional[str] = Field(
+        default=None, description="ISO 4217 code, e.g. CLP (default), USD, ARS"
+    )
     paid_by_name: Optional[str] = None
     split_mode: SplitMode = "EVENLY"
     paid_for_names: list[str] = Field(default_factory=list, description="Empty means everyone")
@@ -83,7 +85,7 @@ Respondé ÚNICAMENTE con un objeto JSON (sin texto alrededor, sin markdown) con
 - message_type: "expense" | "command" | "chitchat"
 - title: string (título corto, ej. "birra", "Uber")
 - amount: number (unidades mayores: 15000 para 15.000 ARS, 12.5 para US$12,50)
-- currency: string (ISO 4217, ej. ARS, USD, CLP)
+- currency: string (ISO 4217, ej. CLP, USD, ARS; por defecto CLP)
 - paid_by_name: string (quién pagó; "" si no se aclara)
 - split_mode: "EVENLY" | "BY_SHARES" | "BY_PERCENTAGE" | "BY_AMOUNT"
 - paid_for_names: array de strings (vacío = todos)

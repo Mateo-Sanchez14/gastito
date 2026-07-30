@@ -400,7 +400,8 @@ def _resolve_expense_fields(
             )
 
     # Currency conversion to USD (group currency).
-    currency = (extraction.currency or "USD").upper()
+    # CLP is the group's default: if the LLM couldn't tell, assume chilean pesos.
+    currency = (extraction.currency or "CLP").upper()
     try:
         conv = convert(extraction.amount, currency, link.get("fxArsSource", "blue"))
     except (ConversionError, Exception):

@@ -333,7 +333,7 @@ def _transcribe_voice_note(msg: InboundGroupMessage, group_id: str) -> str:
     try:
         result = transcribe(audio, msg.audio_mime, _voice_vocabulary(group_id))
     except Exception:
-        logger.exception("Gemini transcription failed (%s bytes, %s)", len(audio), msg.audio_mime)
+        logger.exception("Transcription crashed (%s bytes, %s)", len(audio), msg.audio_mime)
         _reply(msg, "🎙️ No pude escuchar tu audio ahora ⚠️. Probá de nuevo en un rato.")
         return ""
 
@@ -346,7 +346,11 @@ def _transcribe_voice_note(msg: InboundGroupMessage, group_id: str) -> str:
         result.transcript if result else None,
     )
 
-    if not result or not result.has_speech or not result.transcript:
+    if result is None:
+        # Every provider failed — not the same as "heard it, no speech".
+        _reply(msg, "🎙️ No pude escuchar tu audio ahora ⚠️. Probá de nuevo en un rato.")
+        return ""
+    if not result.has_speech or not result.transcript:
         _reply(msg, "🎙️ Escuché el audio pero no entendí nada 😅. ¿Lo repetís un poco más claro?")
         return ""
     return result.transcript

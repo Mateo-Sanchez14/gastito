@@ -36,6 +36,9 @@ Reglas:
 - Slang de plata a dígitos completos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000,
   15k = 15000); "palo"/"palos" = millones (2 palos = 2000000); "gamba" = 100;
   "mango"/"pesos" = CLP.
+- NÚMEROS EN PALABRAS a dígitos (una nota de voz transcripta puede traerlos así):
+  "ocho mil" = 8000; "ocho mil quinientos" = 8500; "ciento veinte mil" = 120000;
+  "doce con cincuenta" = 12.5; "quince lucas" = 15000; "dos palos y medio" = 2500000.
 - La jerga puede venir con decimal (típico de una nota de voz transcripta): "2,5 palos"
   = 2500000; "0,5 palos" = 500000; "1,5 lucas" = 1500; "0,5 gambas" = 50.
 - Notación: en español/argentino el PUNTO es separador de miles (1.500 = 1500) y la COMA es

@@ -39,8 +39,14 @@ class Settings:
     # there is NO fallback provider here. `voice_notes_enabled` is a kill switch
     # separate from `gemini_api_key` on purpose — that key is also the extractor's
     # fallback, so you can't turn voice off by clearing it.
+    # Gemini (free tier) transcribes first; OpenAI is the paid safety net for
+    # when Gemini 429s, which is what took voice notes down on 2026-07-31.
+    # Leave `openai_audio_key` empty and voice goes back to Gemini-only.
     voice_notes_enabled: bool
     gemini_transcribe_model: str
+    openai_audio_key: str
+    openai_audio_base_url: str
+    openai_audio_model: str
     voice_transcribe_timeout: float
     voice_max_bytes: int
     voice_max_seconds: int
@@ -93,6 +99,11 @@ def load_settings() -> Settings:
         # fallback model. Pointing it at a text-only model shouldn't silently
         # break transcription.
         gemini_transcribe_model=os.getenv("GEMINI_TRANSCRIBE_MODEL", "gemini-flash-latest"),
+        openai_audio_key=os.getenv("OPENAI_AUDIO_KEY", ""),
+        openai_audio_base_url=os.getenv("OPENAI_AUDIO_BASE_URL", "https://api.openai.com/v1").rstrip(
+            "/"
+        ),
+        openai_audio_model=os.getenv("OPENAI_AUDIO_MODEL", "gpt-4o-mini-transcribe"),
         # Audio is much slower than text; the extractor's 30s would time out on a
         # long voice note.
         voice_transcribe_timeout=float(os.getenv("VOICE_TRANSCRIBE_TIMEOUT_SECONDS", "90")),

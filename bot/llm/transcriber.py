@@ -1,10 +1,15 @@
 """WhatsApp voice note -> text, so the normal expense pipeline can read it.
 
-Gemini only. This is the one place with NO fallback provider: the primary
-extraction model (GitHub Models `openai/gpt-4o-mini`) can't accept audio, so the
-two-provider resilience `extractor._run` gives every other LLM call does not
-exist here. A Gemini outage or a free-tier 429 burst takes voice notes down —
-a deliberate trade, not an oversight.
+Gemini (free tier) first, OpenAI as the paid safety net. Voice notes used to be
+Gemini-only and a free-tier 429 burst took them down (2026-07-31), so OpenAI is
+here strictly for that: it only runs when Gemini fails, which keeps the bill at
+roughly zero while removing the single point of failure.
+
+The two providers return different shapes: Gemini answers the JSON contract
+below (``has_speech`` + ``transcript``), while OpenAI's transcription endpoint is
+plain ASR and returns bare text. `_from_plain_text` reconciles them, and the
+prompt rules Gemini follows (numbers as digits, slang kept verbatim) are enforced
+downstream by `extractor.SYSTEM_PROMPT` when the OpenAI path is used.
 
 The transcript is a *wire format between two models*: whatever comes out of here
 is fed straight into `extractor.SYSTEM_PROMPT`, whose money rules are already
@@ -72,18 +77,47 @@ def _build_prompt(vocabulary: list[str]) -> str:
     )
 
 
-def transcribe(audio: bytes, mime_type: str, vocabulary: list[str]) -> Transcription | None:
-    """Transcribe a voice note. None = the provider failed (vs. a valid
-    ``has_speech=False`` result, which means "we heard it, there was no speech").
+def _finish(result: Transcription) -> Transcription:
+    result.transcript = (result.transcript or "").strip()
+    if not result.transcript:
+        result.has_speech = False
+    return result
+
+
+def _transcribe_openai(audio: bytes, mime_type: str, vocabulary: list[str]) -> Transcription:
+    """Paid fallback: OpenAI's transcription endpoint (plain ASR, no JSON mode).
+
+    ``prompt`` is the only steering this endpoint accepts — it takes a style/
+    vocabulary hint, not instructions, so the group's names go in to stop the ASR
+    from mangling apodos. Everything else (digits, slang) is left to the extractor.
+    """
+    ext = {"audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/wav": "wav"}.get(
+        (mime_type or "").split(";")[0].strip(), "ogg"
+    )
+    data = {"model": settings.openai_audio_model, "language": "es", "response_format": "text"}
+    if vocabulary:
+        data["prompt"] = "Nombres del grupo: " + ", ".join(vocabulary)
+
+    resp = httpx.post(
+        f"{settings.openai_audio_base_url}/audio/transcriptions",
+        headers={"Authorization": f"Bearer {settings.openai_audio_key}"},
+        files={"file": (f"audio.{ext}", audio, mime_type or "audio/ogg")},
+        data=data,
+        timeout=settings.voice_transcribe_timeout,
+    )
+    resp.raise_for_status()
+    text = resp.text.strip()
+    return _finish(Transcription(has_speech=bool(text), transcript=text))
+
+
+def _transcribe_gemini(audio: bytes, mime_type: str, vocabulary: list[str]) -> Transcription:
+    """Free tier, and the only provider that honours the prompt rules directly.
 
     The httpx plumbing deliberately duplicates ``extractor._call_gemini`` rather
     than sharing a helper: factoring it out would touch the working extraction
     path for no user-visible gain. The differences that matter are the audio
     ``inline_data`` part and the much longer timeout.
     """
-    if not settings.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY not configured")
-
     system = f"{TRANSCRIBE_SYSTEM_PROMPT}\n\n{TRANSCRIBE_JSON_INSTRUCTION}"
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
@@ -114,16 +148,40 @@ def transcribe(audio: bytes, mime_type: str, vocabulary: list[str]) -> Transcrip
         },
         timeout=settings.voice_transcribe_timeout,
     )
-    if resp.status_code == 429:
-        # Worth its own line: "rate limited" and "broken" need very different
-        # reactions when you're reading prod logs at 2am.
-        logger.warning("Gemini transcription rate-limited (429): %s", resp.text[:200])
-        resp.raise_for_status()
     resp.raise_for_status()
 
     text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-    result = Transcription(**json.loads(text))
-    result.transcript = (result.transcript or "").strip()
-    if not result.transcript:
-        result.has_speech = False
-    return result
+    return _finish(Transcription(**json.loads(text)))
+
+
+def transcribe(audio: bytes, mime_type: str, vocabulary: list[str]) -> Transcription | None:
+    """Transcribe a voice note. None = every configured provider failed (vs. a
+    valid ``has_speech=False`` result, which means "we heard it, no speech").
+
+    Gemini first because it's free and prompt-steerable; OpenAI only picks up
+    what Gemini drops. A provider without credentials is skipped, so this stays
+    Gemini-only until ``OPENAI_AUDIO_KEY`` is set.
+    """
+    chain = []
+    if settings.gemini_api_key:
+        chain.append(("gemini", _transcribe_gemini))
+    if settings.openai_audio_key:
+        chain.append((f"openai:{settings.openai_audio_model}", _transcribe_openai))
+    if not chain:
+        raise RuntimeError("No transcription provider configured (GEMINI_API_KEY / OPENAI_AUDIO_KEY)")
+
+    for name, provider in chain:
+        try:
+            return provider(audio, mime_type, vocabulary)
+        except httpx.HTTPStatusError as e:
+            # Worth its own line: "rate limited" and "broken" need very different
+            # reactions when you're reading prod logs at 2am.
+            if e.response.status_code == 429:
+                logger.warning("%s transcription rate-limited (429): %s", name, e.response.text[:200])
+            else:
+                logger.warning("%s transcription failed (%s)", name, e.response.status_code)
+        except Exception:
+            logger.exception("%s transcription failed", name)
+
+    logger.error("All transcription providers failed (%s bytes, %s)", len(audio), mime_type)
+    return None

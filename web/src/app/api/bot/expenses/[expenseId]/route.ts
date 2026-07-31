@@ -3,6 +3,7 @@ import {
   BotExpensePayload,
   buildExpenseFormValues,
   requireBotAuth,
+  validateBotSplit,
 } from '@/lib/bot-auth'
 
 // gastito: delete an expense (the `deshacer`/undo command). groupId is required
@@ -59,6 +60,10 @@ export async function PATCH(
   }
   if (!payload.paidForIds?.length) {
     return Response.json({ error: 'paidForIds must be non-empty' }, { status: 400 })
+  }
+  const splitError = validateBotSplit(payload)
+  if (splitError) {
+    return Response.json({ error: splitError }, { status: 400 })
   }
 
   const existing = await getExpense(payload.groupId, expenseId)

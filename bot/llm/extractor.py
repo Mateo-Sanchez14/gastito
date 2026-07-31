@@ -62,8 +62,18 @@ Reglas:
 - APODOS: a cada participante le pueden figurar apodos entre paréntesis, "(apodos: ...)". Un apodo
   refiere al MISMO participante; devolvé SIEMPRE el nombre canónico (el de antes del paréntesis),
   nunca el apodo. Ej: con "Fer (apodos: Fernando, Tuco)", tanto "Tuco" como "Fernando" -> "Fer".
-- split_mode: EVENLY salvo que indique porcentajes (BY_PERCENTAGE), partes (BY_SHARES) o montos
-  exactos por persona (BY_AMOUNT).
+- split_mode: EVENLY salvo que indique porcentajes (BY_PERCENTAGE, ej. "yo 70% y él 30%"),
+  partes/proporciones (BY_SHARES) o montos exactos por persona (BY_AMOUNT, ej. "10900 por
+  Mauri, 16700 por Errazquin").
+- PARTES POR PERSONA (BY_AMOUNT / BY_PERCENTAGE): completá split_parts con TODAS las
+  personas entre las que se divide, una entrada por persona. TRANSCRIBÍ cada número tal
+  cual aparece (montos en la MISMA moneda del total; porcentajes 0-100). NO HAGAS
+  ARITMÉTICA: no calcules restos, no sumes, no verifiques totales — el sistema lo hace.
+  Si alguien se lleva "el resto" / "lo que queda" / no tiene número explícito, poné value
+  null para esa persona ("el resto para mí" = null para quien escribe). Si dice "el resto
+  entre los demás", enumerá a los presentes que faltan (sin los "[no está]") con value null.
+  En estos modos paid_for_names debe listar los mismos nombres que split_parts (nombres
+  canónicos, regla de apodos).
 - date: ISO YYYY-MM-DD. "anoche"/"ayer" = el día anterior a hoy; si no se aclara, hoy.
 - message_type: "expense" si registra plata gastada; "command" si parece un comando del bot
   ("saldo", "deshacer", "ayuda", "/soy ...", "/cotizacion ..."); "chitchat" si no es ninguno.
@@ -127,6 +137,15 @@ Reglas:
   Si no toca la división, copiá la lista actual. Lista vacía = todos los que están.
   "yo"/"mí"/"conmigo" se refieren a quien escribe (dato "Quien escribe"): incluí su nombre
   si el cambio lo abarca.
+- split_mode y PARTES POR PERSONA (BY_AMOUNT / BY_PERCENTAGE): si la corrección redefine la
+  división con montos exactos o porcentajes, poné el split_mode que corresponda y completá
+  split_parts con TODAS las personas, una entrada por persona. TRANSCRIBÍ cada número tal
+  cual aparece (montos en la MISMA moneda del total; porcentajes 0-100). NO HAGAS
+  ARITMÉTICA: no calcules restos ni verifiques totales — el sistema lo hace. "el resto" /
+  sin número explícito = value null para esa persona.
+- Si la corrección NO toca la división, devolvé split_parts: [] (el sistema conserva la
+  actual). NUNCA copies los números de la división actual a split_parts: solo transcribí
+  números que el mensaje de corrección diga explícitamente.
 - PRESENCIA: un participante marcado "[no está]" sigue anotado en el grupo pero no está
   presente ahora. Cuando tengas que ENUMERAR (ej. "todos menos Pichi"), NO lo incluyas.
   Sí incluilo si el mensaje lo nombra explícitamente.
@@ -150,6 +169,11 @@ def _build_edit_prompt(
     today: str,
 ) -> str:
     split = ", ".join(current.get("paid_for_names") or []) or "todos"
+    # Non-even splits get a per-person description (informative only: the
+    # prompt forbids copying these numbers back into split_parts).
+    split_desc = current.get("split_desc")
+    if split_desc:
+        split = f"{split} — división actual ({current.get('split_mode')}): {split_desc}"
     return (
         f"Fecha de hoy: {today}\n"
         f"Quien escribe: {sender_name or 'desconocido'}\n"

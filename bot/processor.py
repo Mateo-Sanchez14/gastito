@@ -17,6 +17,7 @@ from config import settings
 from fx.provider import ConversionError, convert
 from llm.extractor import extract, extract_edit, roast_joke
 from llm.transcriber import transcribe
+from splits import SplitError, convert_shares, fill_remainder
 from util import (
     active_participants,
     format_money,
@@ -214,8 +215,9 @@ def _process(payload: dict) -> None:
         _reply(msg, e.reply)
         return
 
-    # NOTE v1: we always split EVENLY among `paid_for` (we don't yet extract
-    # per-person amounts/percentages). Named subsets still work via paid_for.
+    # Split: EVENLY, or BY_AMOUNT/BY_PERCENTAGE when the message spelled out
+    # per-person parts (resolved["shares"] is aligned with resolved["paid_for"];
+    # both come from the same list — don't reorder one without the other).
     # We build the payload now but DON'T save it — it waits for confirmation.
     # `externalId` is the original message id so the eventual create stays
     # idempotent and replying to that message later still edits this expense.
@@ -226,12 +228,14 @@ def _process(payload: dict) -> None:
         "category": _resolve_category(extraction.category, categories),
         "paidById": resolved["paid_by_id"],
         "paidForIds": [p["id"] for p in resolved["paid_for"]],
-        "splitMode": "EVENLY",
+        "splitMode": resolved["split_mode"],
         "expenseDate": extraction.date or today,
         "source": "whatsapp",
         "externalId": msg.message_id,
         "createdByParticipantId": sender_pid,
     }
+    if resolved["shares"] is not None:
+        expense_payload["shares"] = resolved["shares"]
     expense_payload.update(_original_currency_fields(resolved))
 
     display = _build_display(extraction, resolved, participants)
@@ -382,8 +386,27 @@ def _resolve_expense_fields(
     if not paid_by_id:
         raise _ResolveError("¿Quién pagó este gasto?")
 
+    # Non-even splits: the people AND their slices come from split_parts, the
+    # single source of truth (paid_for_names is ignored on this branch — two
+    # lists the LLM must keep aligned is one list too many).
+    split_mode = extraction.split_mode
+    split_parts = extraction.split_parts if split_mode in ("BY_AMOUNT", "BY_PERCENTAGE") else []
+
     # Who it's split among (empty = everyone who's currently on the trip).
-    if extraction.paid_for_names:
+    if split_parts:
+        paid_for = []
+        seen_ids: set[str] = set()
+        for part in split_parts:
+            p = match_participant(part.name, participants)
+            if not p:
+                raise _ResolveError(f"No reconozco a *{part.name}* en el grupo.")
+            if p["id"] in seen_ids:
+                raise _ResolveError(
+                    f"*{p['name']}* aparece dos veces en la división 🤔. ¿Me la pasás de nuevo?"
+                )
+            seen_ids.add(p["id"])
+            paid_for.append(p)
+    elif extraction.paid_for_names:
         # Names are matched against the FULL roster, not just the active subset:
         # someone who already left (or hasn't arrived) can still have fronted
         # money or owe a share, and naming them explicitly must keep working.
@@ -414,14 +437,60 @@ def _resolve_expense_fields(
             f"No pude convertir {currency} a USD ahora ⚠️. Probá de nuevo en un rato."
         )
 
-    return {
+    resolved = {
         "paid_by_id": paid_by_id,
         "paid_for": paid_for,
         "conv": conv,
         "currency": currency,
         "original_cents": round(extraction.amount * 100),
         "usd_cents": round(conv.usd * 100),
+        # EVENLY unless split_parts below says otherwise.
+        "split_mode": "EVENLY",
+        "shares": None,  # group cents (BY_AMOUNT) or basis points (BY_PERCENTAGE)
+        "shares_orig_cents": None,  # original-currency cents, BY_AMOUNT only
+        "share_is_remainder": None,  # which shares the bot derived (not transcribed)
     }
+
+    if split_parts:
+        # The LLM only transcribes; every derived number (the remainder, the FX
+        # per share, the rounding) is computed here so a bad list becomes a
+        # question instead of a silently wrong expense.
+        values = [
+            round(part.value * 100) if part.value is not None else None
+            for part in split_parts
+        ]
+        try:
+            if split_mode == "BY_AMOUNT":
+                orig = fill_remainder(resolved["original_cents"], values)
+                shares = convert_shares(orig, resolved["usd_cents"], conv.conversion_rate)
+                resolved["shares_orig_cents"] = orig
+            else:  # BY_PERCENTAGE: basis points of 10000, no FX involved
+                shares = fill_remainder(10000, values)
+        except SplitError as e:
+            raise _ResolveError(_split_error_reply(e, extraction, split_mode, values))
+        resolved["split_mode"] = split_mode
+        resolved["shares"] = shares
+        resolved["share_is_remainder"] = [v is None for v in values]
+
+    return resolved
+
+
+def _split_error_reply(err: SplitError, extraction, split_mode: str, values: list) -> str:
+    """The clarification for a split the numbers can't honor."""
+    if err.reason in ("sum_exceeds_total", "sum_mismatch"):
+        explicit = sum(v for v in values if v is not None) / 100
+        if split_mode == "BY_PERCENTAGE":
+            return (
+                f"Los porcentajes suman {explicit:g}% pero tienen que sumar 100% 🤔. "
+                "¿Me pasás la división de nuevo?"
+            )
+        currency = (extraction.currency or "CLP").upper()
+        return (
+            f"Las partes suman {explicit:g} pero el total es {extraction.amount:g} "
+            f"{currency} 🤔. ¿Me pasás la división de nuevo?"
+        )
+    # zero_remainder / zero_share / rounding_wiped_share / empty
+    return "Con esa división a alguien le queda $0 🤔. ¿Cómo lo divido?"
 
 
 def _original_currency_fields(resolved: dict) -> dict:
@@ -433,6 +502,32 @@ def _original_currency_fields(resolved: dict) -> dict:
         "originalCurrency": resolved["currency"],
         "conversionRate": resolved["conv"].conversion_rate,
     }
+
+
+def _current_split_desc(target: dict, name_by_id: dict, currency: str) -> str | None:
+    """Describe a non-EVENLY split per person for the edit prompt (informative
+    only — the prompt forbids copying these numbers back). BY_AMOUNT shares are
+    stored in group cents; shown in the original currency via the stored
+    conversionRate, rounded (the exact figures the user once said are gone)."""
+    mode = target.get("splitMode") or "EVENLY"
+    shares = target.get("shares") or []
+    ids = target.get("paidForIds", [])
+    if mode == "EVENLY" or len(shares) != len(ids):
+        return None
+    parts = []
+    for pid, share in zip(ids, shares):
+        name = name_by_id.get(pid, "?")
+        if mode == "BY_PERCENTAGE":
+            parts.append(f"{name}: {share / 100:g}%")
+        elif mode == "BY_AMOUNT":
+            rate = target.get("conversionRate")
+            if rate and currency != "USD":
+                parts.append(f"{name}: ~{(share / 100) / rate:.0f} {currency}")
+            else:
+                parts.append(f"{name}: {format_money(share)}")
+        else:  # BY_SHARES
+            parts.append(f"{name}: {share / 100:g} partes")
+    return ", ".join(parts)
 
 
 def _process_edit(
@@ -468,6 +563,8 @@ def _process_edit(
         ],
         "category": cat_by_id.get(target.get("categoryId")),
         "date": target.get("expenseDate"),
+        "split_mode": target.get("splitMode") or "EVENLY",
+        "split_desc": _current_split_desc(target, name_by_id, cur_currency),
     }
 
     extraction = extract_edit(
@@ -506,6 +603,55 @@ def _process_edit(
         _reply(msg, e.reply)
         return
 
+    # The correction didn't restate the split but the expense has a non-even
+    # one: preserve it (saving the hardcoded EVENLY here used to silently
+    # destroy a BY_AMOUNT division). Preserving only works if the people and —
+    # for exact amounts — the total still match; otherwise ask.
+    target_mode = target.get("splitMode") or "EVENLY"
+    if resolved["split_mode"] == "EVENLY" and target_mode != "EVENLY":
+        target_ids = target.get("paidForIds", [])
+        target_shares = target.get("shares") or []
+        if (
+            {p["id"] for p in resolved["paid_for"]} != set(target_ids)
+            or len(target_shares) != len(target_ids)
+        ):
+            _reply(
+                msg,
+                "Ese gasto tiene una división especial y el cambio toca entre "
+                "quiénes va ✋. Pasame la división completa de nuevo (montos o "
+                "porcentajes por persona).",
+            )
+            return
+        if target_mode == "BY_AMOUNT":
+            # Compare in the ORIGINAL currency: the group-currency total is
+            # re-converted at today's rate, so it drifts even when the user
+            # didn't touch the amount (e.g. a title-only correction).
+            old_orig = target.get("originalAmount") or target.get("amount")
+            old_currency = target.get("originalCurrency") or "USD"
+            if resolved["currency"] != old_currency or resolved["original_cents"] != old_orig:
+                _reply(
+                    msg,
+                    "Ese gasto tiene división por montos exactos y cambiaste el "
+                    "total ✋. Pasame la división de nuevo (ej: «10900 por Mauri, "
+                    "16700 por Errazquin y el resto para mí»).",
+                )
+                return
+            # FX moved since the expense was saved: rescale the stored shares
+            # proportionally so they still sum exactly to the fresh total.
+            old_total = target.get("amount")
+            if old_total and resolved["usd_cents"] != old_total:
+                try:
+                    target_shares = convert_shares(
+                        target_shares, resolved["usd_cents"], resolved["usd_cents"] / old_total
+                    )
+                except SplitError:
+                    _reply(msg, "No pude reacomodar la división por montos ✋. Pasámela de nuevo.")
+                    return
+        by_id = {p["id"]: p for p in participants}
+        resolved["paid_for"] = [by_id[i] for i in target_ids if i in by_id]
+        resolved["split_mode"] = target_mode
+        resolved["shares"] = target_shares
+
     edit_payload: dict = {
         "groupId": group_id,
         "title": extraction.title or target.get("title") or "Gasto",
@@ -513,10 +659,12 @@ def _process_edit(
         "category": _resolve_category(extraction.category, categories),
         "paidById": resolved["paid_by_id"],
         "paidForIds": [p["id"] for p in resolved["paid_for"]],
-        "splitMode": "EVENLY",
+        "splitMode": resolved["split_mode"],
         "expenseDate": extraction.date or target.get("expenseDate") or today,
         "createdByParticipantId": sender_pid,
     }
+    if resolved["shares"] is not None:
+        edit_payload["shares"] = resolved["shares"]
     edit_payload.update(_original_currency_fields(resolved))
 
     try:
@@ -526,16 +674,7 @@ def _process_edit(
         _reply(msg, "No pude actualizar el gasto 😞. Probá de nuevo.")
         return
 
-    confirmation = _confirmation(
-        extraction,
-        resolved["conv"],
-        resolved["usd_cents"],
-        resolved["currency"],
-        resolved["paid_by_id"],
-        resolved["paid_for"],
-        participants,
-        edited=True,
-    )
+    confirmation = _confirmation(extraction, resolved, participants, edited=True)
     conf_id = _reply(msg, confirmation)
     # Link the new confirmation so a further reply keeps editing the same expense.
     if conf_id:
@@ -684,6 +823,64 @@ def _among_label(paid_for: list[dict], participants: list[dict]) -> str:
     return ", ".join(p["name"] for p in paid_for)
 
 
+def _build_breakdown(resolved: dict) -> list[dict] | None:
+    """Per-person lines for a non-even split, or None when EVENLY.
+
+    ``group_cents`` for percentages mirrors how spliit computes them
+    (amount * bp / 10000), with the last person absorbing the rounding — it's
+    display only, the saved shares are the basis points.
+    """
+    if resolved.get("split_mode") in (None, "EVENLY") or not resolved.get("shares"):
+        return None
+    shares = resolved["shares"]
+    is_remainder = resolved["share_is_remainder"] or [False] * len(shares)
+    breakdown = []
+    if resolved["split_mode"] == "BY_AMOUNT":
+        # A preserved split (edit path) has no original-currency figures — the
+        # stored shares are group cents only; render those alone.
+        origs = resolved.get("shares_orig_cents") or [None] * len(shares)
+        for p, orig, group, rem in zip(resolved["paid_for"], origs, shares, is_remainder):
+            breakdown.append(
+                {"name": p["name"], "orig_cents": orig, "group_cents": group,
+                 "percent_bp": None, "is_remainder": rem}
+            )
+    else:  # BY_PERCENTAGE
+        remaining = resolved["usd_cents"]
+        for i, (p, bp, rem) in enumerate(
+            zip(resolved["paid_for"], shares, is_remainder)
+        ):
+            group = remaining if i == len(shares) - 1 else round(
+                resolved["usd_cents"] * bp / 10000
+            )
+            remaining -= group
+            breakdown.append(
+                {"name": p["name"], "orig_cents": None, "group_cents": group,
+                 "percent_bp": bp, "is_remainder": rem}
+            )
+    return breakdown
+
+
+def _breakdown_lines(breakdown: list[dict], currency: str) -> str:
+    """The bullet list of the split. Original currency (or %) is what the user
+    has in their head — it goes first, so a hallucinated number jumps out; the
+    group-currency figure follows in parentheses. "— el resto" marks the values
+    the bot derived, as opposed to what the LLM transcribed."""
+    lines = []
+    for b in breakdown:
+        if b["percent_bp"] is not None:
+            label = f"{b['percent_bp'] / 100:g}% ({format_money(b['group_cents'])})"
+        elif b["orig_cents"] is not None and currency != "USD":
+            label = (
+                f"{b['orig_cents'] / 100:g} {currency} "
+                f"({format_money(b['group_cents'])})"
+            )
+        else:
+            label = format_money(b["group_cents"])
+        rest = " — el resto" if b["is_remainder"] else ""
+        lines.append(f"  • {b['name']}: {label}{rest}")
+    return "\n".join(lines)
+
+
 def _build_display(extraction, resolved: dict, participants: list[dict]) -> dict:
     """Snapshot the fields needed to render the confirmation preview later."""
     name_by_id = {p["id"]: p["name"] for p in participants}
@@ -696,6 +893,12 @@ def _build_display(extraction, resolved: dict, participants: list[dict]) -> dict
         "fx_label": resolved["conv"].label,
         "payer_name": name_by_id.get(resolved["paid_by_id"], "alguien"),
         "among": among,
+        "breakdown": _build_breakdown(resolved),
+        "split_warning": (
+            "⚠️ Todavía no sé dividir por partes; lo propongo en partes iguales."
+            if extraction.split_mode == "BY_SHARES"
+            else None
+        ),
     }
 
 
@@ -713,7 +916,14 @@ def _preview_text(display: dict) -> str:
     line = f"📝 Voy a registrar: {format_money(display['usd_cents'])} — {title}"
     if display["currency"] != "USD":
         line += f" ({display['amount']:g} {display['currency']} @ {display['fx_label']})"
-    line += f"\nPagó {display['payer_name']}, dividido entre {display['among']}."
+    breakdown = display.get("breakdown")
+    if breakdown:
+        line += f"\nPagó {display['payer_name']}, dividido así:"
+        line += f"\n{_breakdown_lines(breakdown, display['currency'])}"
+    else:
+        line += f"\nPagó {display['payer_name']}, dividido entre {display['among']}."
+    if display.get("split_warning"):
+        line += f"\n{display['split_warning']}"
     susp = _suspicious_line(display["payer_name"])
     if susp:
         line += f"\n{susp}"
@@ -721,18 +931,21 @@ def _preview_text(display: dict) -> str:
     return line
 
 
-def _confirmation(
-    extraction, conv, usd_cents, currency, paid_by_id, paid_for, participants, edited=False
-) -> str:
+def _confirmation(extraction, resolved: dict, participants, edited=False) -> str:
     name_by_id = {p["id"]: p["name"] for p in participants}
-    payer = name_by_id.get(paid_by_id, "alguien")
-    among = _among_label(paid_for, participants)
+    payer = name_by_id.get(resolved["paid_by_id"], "alguien")
     title = extraction.title or "Gasto"
 
-    line = f"{'✏️ Actualizado:' if edited else '✅'} {format_money(usd_cents)} — {title}"
-    if currency != "USD":
-        line += f" ({extraction.amount:g} {currency} @ {conv.label})"
-    line += f"\nPagó {payer}, dividido entre {among}."
+    line = f"{'✏️ Actualizado:' if edited else '✅'} {format_money(resolved['usd_cents'])} — {title}"
+    if resolved["currency"] != "USD":
+        line += f" ({extraction.amount:g} {resolved['currency']} @ {resolved['conv'].label})"
+    breakdown = _build_breakdown(resolved)
+    if breakdown:
+        line += f"\nPagó {payer}, dividido así:"
+        line += f"\n{_breakdown_lines(breakdown, resolved['currency'])}"
+    else:
+        among = _among_label(resolved["paid_for"], participants)
+        line += f"\nPagó {payer}, dividido entre {among}."
     susp = _suspicious_line(payer)
     if susp:
         line += f"\n{susp}"

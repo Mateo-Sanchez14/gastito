@@ -3,6 +3,7 @@ import {
   BotExpensePayload,
   buildExpenseFormValues,
   requireBotAuth,
+  validateBotSplit,
 } from '@/lib/bot-auth'
 import { getExpenseByExternalId } from '@/lib/bot'
 
@@ -32,6 +33,10 @@ export async function POST(req: Request) {
   }
   if (!payload.paidForIds?.length) {
     return Response.json({ error: 'paidForIds must be non-empty' }, { status: 400 })
+  }
+  const splitError = validateBotSplit(payload)
+  if (splitError) {
+    return Response.json({ error: splitError }, { status: 400 })
   }
 
   const source = payload.source ?? 'whatsapp'

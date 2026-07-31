@@ -243,6 +243,7 @@ export type BotExpenseDetail = {
   conversionRate: number | null
   paidById: string
   paidForIds: string[]
+  shares: number[] // aligned with paidForIds; cents (BY_AMOUNT) / bp (BY_PERCENTAGE)
   splitMode: string
   expenseDate: string // ISO date (YYYY-MM-DD)
 }
@@ -267,6 +268,7 @@ export async function getBotExpenseDetail(
     conversionRate: e.conversionRate ? Number(e.conversionRate) : null,
     paidById: e.paidById,
     paidForIds: e.paidFor.map((pf) => pf.participantId),
+    shares: e.paidFor.map((pf) => pf.shares),
     splitMode: e.splitMode,
     expenseDate: e.expenseDate.toISOString().slice(0, 10),
   }

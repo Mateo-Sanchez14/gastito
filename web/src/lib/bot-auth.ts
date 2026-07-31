@@ -45,6 +45,28 @@ export type BotExpensePayload = {
 }
 
 /**
+ * Validate a non-even split before it reaches Prisma. The bot path skips
+ * spliit's zod `superRefine` checks (sum of shares === amount, no zero
+ * shares) because `buildExpenseFormValues` constructs the already-transformed
+ * form value directly — so an inconsistent payload would be saved without
+ * error. Returns an error message, or null when the payload is fine.
+ */
+export function validateBotSplit(payload: BotExpensePayload): string | null {
+  const mode = payload.splitMode ?? 'EVENLY'
+  if (mode !== 'BY_AMOUNT' && mode !== 'BY_PERCENTAGE') return null
+  const shares = payload.shares
+  if (!shares || shares.length !== payload.paidForIds.length)
+    return `${mode} requires shares aligned with paidForIds`
+  if (shares.some((s) => !Number.isInteger(s) || s <= 0))
+    return `${mode} shares must be positive integers`
+  const sum = shares.reduce((a, b) => a + b, 0)
+  const expected = mode === 'BY_AMOUNT' ? payload.amount : 10000
+  if (sum !== expected)
+    return `${mode} shares must sum to ${expected} (got ${sum})`
+  return null
+}
+
+/**
  * Build the `ExpenseFormValues` that spliit's `createExpense` expects from the
  * bot's resolved payload. The bot has already resolved names -> participant ids
  * and converted money to group-currency cents, so we construct the

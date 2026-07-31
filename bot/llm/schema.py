@@ -10,6 +10,19 @@ SplitMode = Literal["EVENLY", "BY_SHARES", "BY_PERCENTAGE", "BY_AMOUNT"]
 MessageType = Literal["expense", "command", "chitchat"]
 
 
+class SplitPart(BaseModel):
+    """One person's slice of a non-even split, as stated in the message.
+
+    ``value`` is a major-unit amount in the message's currency (BY_AMOUNT) or a
+    percentage 0-100 (BY_PERCENTAGE). ``None`` means "el resto": that person
+    shares whatever remains, which the processor computes — the LLM must never
+    do arithmetic (it has hallucinated derived amounts in production).
+    """
+
+    name: str
+    value: Optional[float] = None
+
+
 class ExpenseExtraction(BaseModel):
     message_type: MessageType
     title: Optional[str] = None
@@ -22,6 +35,9 @@ class ExpenseExtraction(BaseModel):
     paid_by_name: Optional[str] = None
     split_mode: SplitMode = "EVENLY"
     paid_for_names: list[str] = Field(default_factory=list, description="Empty means everyone")
+    split_parts: list[SplitPart] = Field(
+        default_factory=list, description="Per-person values for BY_AMOUNT/BY_PERCENTAGE"
+    )
     category: Optional[str] = None
     date: Optional[str] = Field(default=None, description="ISO date YYYY-MM-DD; default today")
     confidence: float = 0.0
@@ -42,6 +58,41 @@ class ExpenseExtraction(BaseModel):
         if value in get_args(SplitMode):
             return value
         return "EVENLY"
+
+    @field_validator("split_parts", mode="before")
+    @classmethod
+    def _tolerate_malformed_split_parts(cls, value):
+        """Discard the whole list on any malformed entry instead of failing.
+
+        Same spirit as ``_tolerate_blank_split_mode``: a noisy model must not
+        sink the entire extraction. But never salvage a partial list — a split
+        missing one person would be saved silently wrong, while ``[]`` falls
+        back to the EVENLY preview where the user can catch it and say "no".
+        """
+        if value is None or value == "":
+            return []
+        if not isinstance(value, list):
+            return []
+        cleaned = []
+        for entry in value:
+            if isinstance(entry, SplitPart):
+                cleaned.append(entry)
+                continue
+            if not isinstance(entry, dict):
+                return []
+            name = entry.get("name")
+            if not isinstance(name, str) or not name.strip():
+                return []
+            amount = entry.get("value")
+            if isinstance(amount, str):
+                try:
+                    amount = float(amount.replace(",", "."))
+                except ValueError:
+                    return []
+            if amount is not None and not isinstance(amount, (int, float)):
+                return []
+            cleaned.append({"name": name, "value": amount})
+        return cleaned
 
 
 class RoastResult(BaseModel):
@@ -89,6 +140,10 @@ Respondé ÚNICAMENTE con un objeto JSON (sin texto alrededor, sin markdown) con
 - paid_by_name: string (quién pagó; "" si no se aclara)
 - split_mode: "EVENLY" | "BY_SHARES" | "BY_PERCENTAGE" | "BY_AMOUNT"
 - paid_for_names: array de strings (vacío = todos)
+- split_parts: array de objetos {"name": string, "value": number|null} SOLO si split_mode
+  es BY_AMOUNT o BY_PERCENTAGE; si no, []. En BY_AMOUNT value es el monto en la MISMA
+  moneda del total, unidades mayores; en BY_PERCENTAGE es el porcentaje (0-100).
+  null = esa persona se lleva el resto.
 - category: string
 - date: string (YYYY-MM-DD)
 - confidence: number (0..1)

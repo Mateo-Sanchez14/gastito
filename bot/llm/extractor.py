@@ -164,15 +164,15 @@ def _build_edit_prompt(
     )
 
 
-def _call_github_models(system: str, user: str, temperature: float = 0.0) -> dict:
-    """Primary: GitHub Models, OpenAI-compatible chat completions in JSON mode."""
-    if not settings.github_models_token:
-        raise RuntimeError("GITHUB_MODELS_TOKEN not configured")
+def _call_openai_compatible(
+    base_url: str, token: str, model: str, system: str, user: str, temperature: float = 0.0
+) -> dict:
+    """OpenAI-compatible chat completions in JSON mode (Groq, OpenAI, OpenRouter...)."""
     resp = httpx.post(
-        f"{settings.github_models_base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {settings.github_models_token}"},
+        f"{base_url}/chat/completions",
+        headers={"Authorization": f"Bearer {token}"},
         json={
-            "model": settings.github_models_model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -185,6 +185,41 @@ def _call_github_models(system: str, user: str, temperature: float = 0.0) -> dic
     resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"]
     return json.loads(content)
+
+
+def _call_primary(system: str, user: str, temperature: float = 0.0) -> dict:
+    return _call_openai_compatible(
+        settings.llm_primary_base_url,
+        settings.llm_primary_token,
+        settings.llm_primary_model,
+        system,
+        user,
+        temperature,
+    )
+
+
+def _call_secondary(system: str, user: str, temperature: float = 0.0) -> dict:
+    return _call_openai_compatible(
+        settings.llm_secondary_base_url,
+        settings.llm_secondary_token,
+        settings.llm_secondary_model,
+        system,
+        user,
+        temperature,
+    )
+
+
+def _providers() -> list[tuple[str, object]]:
+    """Configured providers, in fallback order. A slot without a token is skipped
+    so an unused one doesn't burn a round-trip (and a log line) per message."""
+    chain = []
+    if settings.llm_primary_token:
+        chain.append((f"primary:{settings.llm_primary_model}", _call_primary))
+    if settings.llm_secondary_token:
+        chain.append((f"secondary:{settings.llm_secondary_model}", _call_secondary))
+    if settings.gemini_api_key:
+        chain.append(("gemini", _call_gemini))
+    return chain
 
 
 def _call_gemini(system: str, user: str, temperature: float = 0.0) -> dict:
@@ -213,8 +248,8 @@ def _call_gemini(system: str, user: str, temperature: float = 0.0) -> dict:
 
 
 def _run(system: str, user: str, what: str) -> ExpenseExtraction | None:
-    """Run the prompt through GitHub Models then Gemini; parse to ExpenseExtraction."""
-    for name, provider in (("github_models", _call_github_models), ("gemini", _call_gemini)):
+    """Run the prompt through the configured providers; parse to ExpenseExtraction."""
+    for name, provider in _providers():
         try:
             data = provider(system, user)
         except Exception as e:
@@ -300,7 +335,7 @@ def roast_joke(text: str, target_name: str) -> RoastResult | None:
     )
     user = f"Mensaje de {target_name or 'el pibe'}:\n{text}"
 
-    for name, provider in (("github_models", _call_github_models), ("gemini", _call_gemini)):
+    for name, provider in _providers():
         try:
             data = provider(system, user, 0.9)
         except Exception as e:

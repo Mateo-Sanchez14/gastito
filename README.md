@@ -34,8 +34,8 @@ WhatsApp grupo
 
 ## Cómo correrlo
 
-1. `cp .env.example .env` y completá los secretos (`GITHUB_MODELS_TOKEN` para el
-   parseo; **`GEMINI_API_KEY` es obligatoria si querés notas de voz** — y además
+1. `cp .env.example .env` y completá los secretos (`LLM_PRIMARY_TOKEN` para el
+   parseo — cualquier proveedor OpenAI-compatible, por defecto Groq; **`GEMINI_API_KEY` es obligatoria si querés notas de voz** — y además
    hace de fallback del parseo; `BOT_INGEST_SECRET` y `GOWA_WEBHOOK_SECRET` pueden
    ser cualquier string fuerte).
 2. `docker compose up --build`

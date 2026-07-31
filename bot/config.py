@@ -19,11 +19,17 @@ class Settings:
     web_ingest_url: str
     bot_ingest_secret: str
 
-    # LLM (natural-language extraction). GitHub Models (OpenAI-compatible) is the
-    # primary; Gemini is the fallback. Both keys are reused from reserv-ia.
-    github_models_token: str
-    github_models_base_url: str
-    github_models_model: str
+    # LLM (natural-language extraction). Two OpenAI-compatible slots tried in
+    # order, then Gemini. Any slot without a token is skipped, so a second
+    # provider is just a matter of filling its env vars.
+    # GitHub Models used to be the primary; it was retired on 2026-07-30 (its
+    # endpoint now answers 410), hence the generic slots.
+    llm_primary_token: str
+    llm_primary_base_url: str
+    llm_primary_model: str
+    llm_secondary_token: str
+    llm_secondary_base_url: str
+    llm_secondary_model: str
     gemini_api_key: str
     gemini_model: str
     confidence_threshold: float
@@ -68,11 +74,16 @@ def load_settings() -> Settings:
         gowa_webhook_secret=os.getenv("GOWA_WEBHOOK_SECRET", ""),
         web_ingest_url=os.getenv("WEB_INGEST_URL", "http://web:3000/api/bot").rstrip("/"),
         bot_ingest_secret=os.getenv("BOT_INGEST_SECRET", ""),
-        github_models_token=os.getenv("GITHUB_MODELS_TOKEN", ""),
-        github_models_base_url=os.getenv(
-            "GITHUB_MODELS_BASE_URL", "https://models.github.ai/inference"
+        llm_primary_token=os.getenv("LLM_PRIMARY_TOKEN", ""),
+        llm_primary_base_url=os.getenv(
+            "LLM_PRIMARY_BASE_URL", "https://api.groq.com/openai/v1"
         ).rstrip("/"),
-        github_models_model=os.getenv("GITHUB_MODELS_MODEL", "openai/gpt-4o-mini"),
+        llm_primary_model=os.getenv("LLM_PRIMARY_MODEL", "llama-3.3-70b-versatile"),
+        llm_secondary_token=os.getenv("LLM_SECONDARY_TOKEN", ""),
+        llm_secondary_base_url=os.getenv(
+            "LLM_SECONDARY_BASE_URL", "https://api.openai.com/v1"
+        ).rstrip("/"),
+        llm_secondary_model=os.getenv("LLM_SECONDARY_MODEL", "gpt-4o-mini"),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-latest"),
         confidence_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.7")),

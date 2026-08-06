@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import categories as cats
@@ -142,6 +143,10 @@ def main() -> int:
     ap.add_argument("--runs", type=int, default=1, help="times to run each case")
     ap.add_argument("--provider", choices=["primary", "secondary", "gemini"])
     ap.add_argument("--skip-edits", action="store_true")
+    ap.add_argument(
+        "--sleep", type=float, default=10.0,
+        help="pause between LLM calls (Groq free tier 429s on back-to-back calls)",
+    )
     args = ap.parse_args()
 
     if args.provider:
@@ -166,6 +171,8 @@ def main() -> int:
             total += 1
             run_problems: list[list[str]] = []
             for _ in range(args.runs):
+                if total > 1 or run_problems:
+                    time.sleep(args.sleep)
                 if suite == "extract":
                     extraction = extract(
                         case["text"], case["sender"], participants,

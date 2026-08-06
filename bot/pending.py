@@ -30,7 +30,10 @@ PENDING_TTL_SECONDS = 600
 @dataclass
 class Pending:
     stage: str  # "description" (waiting for one) | "confirmation" (waiting for sí/no)
-    payload: dict  # the expense payload to POST verbatim once confirmed
+    # The expense payload(s) to POST verbatim once confirmed. Usually one; a
+    # multi-payer message ("A pagó el 30% y B el 70%") proposes one expense per
+    # payer, confirmed or discarded as a single unit.
+    payloads: list[dict]
     display: dict  # fields needed to (re)render the confirmation preview
     created_at: float
 
@@ -55,9 +58,11 @@ def get(chat_id: str, sender_jid: str) -> Pending | None:
         return p
 
 
-def set(chat_id: str, sender_jid: str, stage: str, payload: dict, display: dict) -> None:
+def set(
+    chat_id: str, sender_jid: str, stage: str, payloads: list[dict], display: dict
+) -> None:
     with _lock:
-        _pending[_key(chat_id, sender_jid)] = Pending(stage, payload, display, time.time())
+        _pending[_key(chat_id, sender_jid)] = Pending(stage, payloads, display, time.time())
 
 
 def clear(chat_id: str, sender_jid: str) -> None:

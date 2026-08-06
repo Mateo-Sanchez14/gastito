@@ -1,0 +1,15 @@
+{
+  "today": "2026-08-06",
+  "currencies": ["USD", "ARS", "CLP", "UYU", "BRL", "EUR", "MXN", "PEN", "COP", "PYG", "BOB"],
+  "participants": [
+    {"id": "p-benja", "name": "Benja", "active": true, "aliases": ["Benjamin"]},
+    {"id": "p-qv2", "name": "Qv2", "active": true, "aliases": ["Quevedo", "Franco Quevedo"]},
+    {"id": "p-erra", "name": "Errazquin", "active": true, "aliases": []},
+    {"id": "p-fer", "name": "Fer", "active": true, "aliases": ["Tuco", "Fernando"]},
+    {"id": "p-pichi", "name": "Pichi", "active": true, "aliases": ["Tigre"]},
+    {"id": "p-mauri", "name": "Mauri", "active": true, "aliases": ["Mauricio"]},
+    {"id": "p-mateo", "name": "Mateo", "active": true, "aliases": []},
+    {"id": "p-karim", "name": "Karim", "active": true, "aliases": []},
+    {"id": "p-pablo", "name": "Pablo F", "active": false, "aliases": []}
+  ]
+}

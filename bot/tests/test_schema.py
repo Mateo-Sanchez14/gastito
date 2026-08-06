@@ -59,6 +59,38 @@ class TestSplitParts:
         assert e.split_parts == []
 
 
+class TestPayers:
+    def test_default_empty(self):
+        e = ExpenseExtraction(**_base())
+        assert e.payers == []
+        assert e.payer_mode == "BY_AMOUNT"
+
+    def test_well_formed(self):
+        e = ExpenseExtraction(
+            **_base(
+                payers=[{"name": "Qv2", "value": 30}, {"name": "Fer", "value": 70}],
+                payer_mode="BY_PERCENTAGE",
+            )
+        )
+        assert e.payers == [SplitPart(name="Qv2", value=30), SplitPart(name="Fer", value=70)]
+        assert e.payer_mode == "BY_PERCENTAGE"
+
+    def test_null_and_string_tolerated(self):
+        assert ExpenseExtraction(**_base(payers=None)).payers == []
+        assert ExpenseExtraction(**_base(payers="")).payers == []
+        assert ExpenseExtraction(**_base(payers="Qv2 y Fer")).payers == []
+
+    def test_malformed_entry_discards_all(self):
+        e = ExpenseExtraction(
+            **_base(payers=[{"name": "Qv2", "value": 30}, {"value": 70}])
+        )
+        assert e.payers == []
+
+    def test_blank_payer_mode_falls_back(self):
+        assert ExpenseExtraction(**_base(payer_mode="")).payer_mode == "BY_AMOUNT"
+        assert ExpenseExtraction(**_base(payer_mode="MITADES")).payer_mode == "BY_AMOUNT"
+
+
 class TestSplitModeRegression:
     def test_unknown_split_mode_falls_back_to_evenly(self):
         assert ExpenseExtraction(**_base(split_mode="")).split_mode == "EVENLY"

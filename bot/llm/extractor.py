@@ -41,13 +41,23 @@ Reglas:
   "doce con cincuenta" = 12.5; "quince lucas" = 15000; "dos palos y medio" = 2500000.
 - La jerga puede venir con decimal (típico de una nota de voz transcripta): "2,5 palos"
   = 2500000; "0,5 palos" = 500000; "1,5 lucas" = 1500; "0,5 gambas" = 50.
-- Notación: en español/argentino el PUNTO es separador de miles (1.500 = 1500) y la COMA es
-  decimal (12,5 = 12.5). amount va en unidades mayores de la moneda (15000 para 15.000 ARS,
-  12.5 para US$12,50).
+- Notación: PUNTO seguido de EXACTAMENTE 3 dígitos es separador de MILES (8.042 = ocho mil
+  cuarenta y dos; 1.500 = mil quinientos; 17.000 = diecisiete mil). PUNTO o COMA seguidos de
+  1 o 2 dígitos es DECIMAL (27.26 = 27,26; 185,50 = 185.5). amount va en unidades mayores de
+  la moneda (15000 para 15.000 ARS, 12.5 para US$12,50).
 - Inferí la moneda (ISO 4217). La moneda POR DEFECTO del grupo es CLP (pesos chilenos): si no
   hay pista de país, si dice "pesos"/"mangos"/"lucas" o si aparece "$" a secas, usá CLP.
   Usá ARS solo si el mensaje aclara que son pesos argentinos, UYU si son uruguayos, etc.
-  Usá USD solo si dice "dólares"/"usd"/"US$".
+  Usá USD solo si dice "dólares"/"usd"/"US$". EXCEPCIÓN: CLP y ARS no usan centavos — un
+  monto CON decimales (27.26, 225.91) SIN moneda explícita es casi seguro USD.
+- PAGO DIRECTO: "le pagué X a Fulano", "deuda que pagué a Fulano" es plata que va a UNA sola
+  persona: paid_for_names = [Fulano], categoría "Pago / Deuda". NUNCA "entre todos".
+- VARIOS PAGADORES: si pagó más de una persona ("A y B pagamos...", "A pagó el 30% y B el
+  70%"), completá payers con TODOS los pagadores y lo que puso cada uno (números tal cual,
+  payer_mode BY_PERCENTAGE si son porcentajes; value null = no se aclara / el resto). No
+  elijas un solo pagador en silencio.
+- category: elegí SIEMPRE una de las categorías provistas (la que mejor pegue; si ninguna
+  pega, "Otro"). Nunca la dejes vacía.
 - PRIMERA PERSONA = quien escribe: "yo", "mí", "conmigo", "yo también", "incluido yo" se refieren
   a la persona indicada en "Quien escribe". Si el mensaje divide el gasto e incluye a quien escribe
   (ej. "entre Benja, Fer y yo"), AGREGÁ su nombre a paid_for_names. Nunca lo omitas.
@@ -80,6 +90,48 @@ Reglas:
 - confidence: 0..1. Bajá la confianza si falta el monto, la moneda es dudosa, o no se entiende
   bien quién pagó / entre quiénes se divide. Si algo esencial es ambiguo, completá
   clarification_needed con una pregunta corta en el idioma del mensaje.
+"""
+
+# Worked examples distilled from real mis-parses in production (each covers one
+# failure). The roster here is FICTITIOUS on purpose so the model can't leak an
+# example name into a real extraction — the real participants come in the user
+# prompt, and an invented name fails resolution loudly instead of saving wrong.
+FEW_SHOT_EXAMPLES = """\
+EJEMPLOS. Roster ficticio solo para los ejemplos: Nico, Tomi, Agus, Cami (apodos: Camila,
+Flaca), Rodri, Santi (apodos: Colo). En los mensajes reales usá ÚNICAMENTE los participantes
+provistos. Los ejemplos omiten date y clarification_needed; vos devolvé SIEMPRE todas las
+claves del contrato.
+
+1) [Escribe: Nico] «Pagué Uber hacia el aeropuerto 8.042, dividido entre todos»
+{"message_type":"expense","title":"Uber al aeropuerto","amount":8042,"currency":"CLP","paid_by_name":"","split_mode":"EVENLY","paid_for_names":[],"split_parts":[],"payers":[],"payer_mode":"BY_AMOUNT","category":"Taxi / Uber","confidence":0.9}
+(8.042 = punto + 3 dígitos = OCHO MIL cuarenta y dos, jamás 8 con decimales)
+
+2) [Escribe: Agus] «Uber a la pica del esquí - 27.26 - dividido entre todos»
+{"message_type":"expense","title":"Uber a la pica","amount":27.26,"currency":"USD","paid_by_name":"","split_mode":"EVENLY","paid_for_names":[],"split_parts":[],"payers":[],"payer_mode":"BY_AMOUNT","category":"Taxi / Uber","confidence":0.85}
+(27.26 = punto + 2 dígitos = decimal; con decimales y sin moneda explícita es USD, no CLP)
+
+3) [Escribe: Nico] «Cena de anoche 84 lucas, divide entre Tomi, Agus, Camila y yo»
+{"message_type":"expense","title":"Cena","amount":84000,"currency":"CLP","paid_by_name":"","split_mode":"EVENLY","paid_for_names":["Tomi","Agus","Cami","Nico"],"split_parts":[],"payers":[],"payer_mode":"BY_AMOUNT","category":"Comida","confidence":0.9}
+("y yo" = quien escribe: Nico VA en la lista; "Camila" es apodo, va el canónico "Cami")
+
+4) [Escribe: Cami] «Pagué 185,50 USD el rafting, dividido entre todos menos Rodri»
+{"message_type":"expense","title":"Rafting","amount":185.5,"currency":"USD","paid_by_name":"","split_mode":"EVENLY","paid_for_names":["Nico","Tomi","Agus","Cami","Santi"],"split_parts":[],"payers":[],"payer_mode":"BY_AMOUNT","category":"Entretenimiento","confidence":0.9}
+("todos menos X" se enumera e INCLUYE a quien escribe salvo que se excluya explícitamente)
+
+5) [Escribe: Nico] «Súper 45 lucas: 10900 pone Tomi, 16700 Agus y el resto para mí»
+{"message_type":"expense","title":"Súper","amount":45000,"currency":"CLP","paid_by_name":"","split_mode":"BY_AMOUNT","paid_for_names":["Tomi","Agus","Nico"],"split_parts":[{"name":"Tomi","value":10900},{"name":"Agus","value":16700},{"name":"Nico","value":null}],"payers":[],"payer_mode":"BY_AMOUNT","category":"Supermercado","confidence":0.9}
+("el resto para mí" = quien escribe con value null; NO calcules el resto)
+
+6) [Escribe: Tomi] «Anotá una deuda que le pagué yo a Rodri de 100 usd»
+{"message_type":"expense","title":"Pago a Rodri","amount":100,"currency":"USD","paid_by_name":"Tomi","split_mode":"EVENLY","paid_for_names":["Rodri"],"split_parts":[],"payers":[],"payer_mode":"BY_AMOUNT","category":"Pago / Deuda","confidence":0.9}
+(pago directo a UNA persona: se divide SOLO entre esa persona)
+
+7) [Escribe: Santi] «Camila pagó el 30% y el Colo el otro 70% de 500 USD para todos»
+{"message_type":"expense","title":"Gasto compartido","amount":500,"currency":"USD","paid_by_name":"Cami","split_mode":"EVENLY","paid_for_names":[],"split_parts":[],"payers":[{"name":"Cami","value":30},{"name":"Santi","value":70}],"payer_mode":"BY_PERCENTAGE","category":"Otro","confidence":0.85}
+(dos pagadores: TODOS van en payers con lo que puso cada uno; los % son de lo PAGADO, no de la división)
+
+8) [Escribe: Rodri] «Birras del refugio 24 lucas»
+{"message_type":"expense","title":"Birras del refugio","amount":24000,"currency":"CLP","paid_by_name":"","split_mode":"EVENLY","paid_for_names":[],"split_parts":[],"payers":[],"payer_mode":"BY_AMOUNT","category":"Birras / Alcohol","confidence":0.9}
 """
 
 
@@ -129,7 +181,11 @@ Reglas:
 - REGLA CRÍTICA DE MONTOS: transcribí el número TAL CUAL aparece, sin redondear ni quitar
   dígitos. "8000" es 8000 (NO 8). amount va en unidades mayores de la moneda.
 - Slang de plata a dígitos: "luca"/"lucas"/"k"/"mil" = miles (8 lucas = 8000); "palo"/"palos"
-  = millones; "gamba" = 100; "mango"/"pesos" = CLP (moneda por defecto del grupo). PUNTO = miles (1.500=1500), COMA = decimal.
+  = millones; "gamba" = 100; "mango"/"pesos" = CLP (moneda por defecto del grupo).
+- Notación: PUNTO seguido de EXACTAMENTE 3 dígitos es separador de MILES (8.042 = ocho mil
+  cuarenta y dos; 1.500 = mil quinientos). PUNTO o COMA seguidos de 1 o 2 dígitos es DECIMAL
+  (27.26 = 27,26). CLP y ARS no usan centavos: un monto con decimales sin moneda explícita
+  es casi seguro USD.
 - La jerga puede venir con decimal: "2,5 palos" = 2500000; "0,5 palos" = 500000;
   "1,5 lucas" = 1500; "0,5 gambas" = 50.
 - paid_for_names: si el usuario cambia entre quiénes se divide ("dividí entre todos menos X",
@@ -152,10 +208,22 @@ Reglas:
 - APODOS: a los participantes les pueden figurar apodos entre paréntesis "(apodos: ...)". Un apodo
   refiere al MISMO participante; devolvé SIEMPRE el nombre canónico, nunca el apodo.
 - paid_by_name: si cambia quién pagó, ponelo; si no, copiá el actual.
+- category: si la corrección no la toca, copiá la actual; si la cambia ("es transporte, no
+  comida"), elegí la que corresponda de las categorías provistas.
 - message_type: "expense" SOLO si el mensaje realmente corrige/cambia el gasto. Si es un
   comentario, emoji, agradecimiento o charla que NO cambia nada, devolvé "chitchat".
 - confidence: 0..1. Bajala si la corrección es ambigua y completá clarification_needed con una
   pregunta corta en el idioma del mensaje.
+
+EJEMPLOS (gasto actual → corrección → claves relevantes de la salida; el resto se copia igual):
+1) Gasto: 8.04 CLP «Uber». Corrección: «eran 8.042»
+   → "amount": 8042, "currency": "CLP", "split_parts": []  (punto + 3 dígitos = miles)
+2) Gasto: 30000 CLP «Cena», categoría Comida. Corrección: «es transporte, no comida»
+   → "category": "Taxi / Uber", "split_parts": []  (todo lo demás copiado tal cual)
+3) [Escribe: Rodri] Gasto dividido entre Nico y Tomi. Corrección: «agregame a mí también»
+   → "paid_for_names": ["Nico", "Tomi", "Rodri"], "split_parts": []
+(Nico/Tomi/Rodri son nombres ficticios del ejemplo: en los mensajes reales usá ÚNICAMENTE
+los participantes provistos.)
 """
 
 
@@ -305,7 +373,7 @@ def extract(
     ``participants`` are the full participant dicts ({id, name, aliases}); their
     apodos are shown to the model so it maps a nickname to the canonical name.
     """
-    system = f"{SYSTEM_PROMPT}\n\n{JSON_INSTRUCTION}"
+    system = f"{SYSTEM_PROMPT}\n{FEW_SHOT_EXAMPLES}\n{JSON_INSTRUCTION}"
     user = _build_user_prompt(text, sender_name, participants, currencies, categories, today)
     return _run(system, user, "extract")
 

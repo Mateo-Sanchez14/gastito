@@ -121,6 +121,29 @@ class TestByPercentage:
             _resolve_expense_fields(extraction, PARTICIPANTS, LINK, "p-franco")
 
 
+class TestPaidForNamesDedupe:
+    def test_duplicate_names_merge_silently(self):
+        # Production: "…16700 por Franco y el resto para mí" (Franco = the
+        # writer) proposed "entre Mauri, Qv2, Qv2". EVENLY duplicates merge.
+        extraction = _extract(paid_for_names=["Mauri", "Franco", "Franco"])
+        resolved = _resolve_expense_fields(extraction, PARTICIPANTS, LINK, "p-franco")
+        assert [p["id"] for p in resolved["paid_for"]] == ["p-mauri", "p-franco"]
+
+    def test_split_parts_duplicate_still_errors(self):
+        # Regression guard: the BY_AMOUNT branch must keep REJECTING duplicates
+        # (a duplicate there means one amount would silently vanish).
+        extraction = _extract(
+            split_mode="BY_AMOUNT",
+            split_parts=[
+                {"name": "Franco", "value": 10000},
+                {"name": "Franco", "value": 20000},
+                {"name": "Mauri", "value": None},
+            ],
+        )
+        with pytest.raises(_ResolveError, match="dos veces"):
+            _resolve_expense_fields(extraction, PARTICIPANTS, LINK, "p-franco")
+
+
 class TestEvenlyRegression:
     def test_plain_evenly_unchanged(self):
         extraction = _extract()

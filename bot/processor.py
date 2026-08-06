@@ -11,6 +11,8 @@ import threading
 import time
 from datetime import date
 
+import categories as cats
+import guards
 import pending
 from commands import detect_command, handle_command
 from config import settings
@@ -188,7 +190,7 @@ def _process(payload: dict) -> None:
         msg.sender_name,
         participants,
         SUPPORTED_CURRENCIES,
-        [c["name"] for c in categories],
+        cats.prompt_names(),
         today,
     )
     if extraction is None:
@@ -203,9 +205,36 @@ def _process(payload: dict) -> None:
         return
 
     # --- it's an expense ---
+    # Deterministic guards over the extraction (each one earned by a real
+    # mis-parse in the group; see guards.py). The thousands fix goes before the
+    # confidence gate so a corrected amount doesn't read as "missing".
+    extraction.amount = guards.fix_thousands_misread(extraction.amount, text)
+
     if extraction.confidence < settings.confidence_threshold or not extraction.amount:
         question = extraction.clarification_needed or "¿Cuánto fue y entre quiénes lo divido?"
         _reply(msg, f"🤔 {question}")
+        return
+
+    question = guards.decimal_currency_question(extraction.amount, extraction.currency, text)
+    if question:
+        _reply(msg, question)
+        return
+
+    sender_canonical = next(
+        (p["name"] for p in participants if p["id"] == sender_pid), msg.sender_name or ""
+    )
+    extraction.paid_for_names = guards.ensure_sender_included(
+        extraction.paid_for_names, text, sender_canonical, participants
+    )
+
+    # A lone entry in payers is just the payer said redundantly; only 2+ means
+    # a genuinely shared payment, which becomes one expense per payer.
+    if len(extraction.payers) == 1 and not extraction.paid_by_name:
+        extraction.paid_by_name = extraction.payers[0].name
+    if len(extraction.payers) > 1:
+        _process_multi_payer(
+            msg, extraction, participants, categories, link, sender_pid, group_id, today
+        )
         return
 
     # Resolve payer (default: the sender), split, and FX (shared with edits).
@@ -221,11 +250,12 @@ def _process(payload: dict) -> None:
     # We build the payload now but DON'T save it — it waits for confirmation.
     # `externalId` is the original message id so the eventual create stays
     # idempotent and replying to that message later still edits this expense.
+    category_id = cats.resolve(extraction.category, categories)
     expense_payload: dict = {
         "groupId": group_id,
         "title": (extraction.title or "").strip() or "Gasto",
         "amount": resolved["usd_cents"],
-        "category": _resolve_category(extraction.category, categories),
+        "category": category_id,
         "paidById": resolved["paid_by_id"],
         "paidForIds": [p["id"] for p in resolved["paid_for"]],
         "splitMode": resolved["split_mode"],
@@ -238,17 +268,147 @@ def _process(payload: dict) -> None:
         expense_payload["shares"] = resolved["shares"]
     expense_payload.update(_original_currency_fields(resolved))
 
-    display = _build_display(extraction, resolved, participants)
+    display = _build_display(extraction, resolved, participants, category_id)
 
     # Always require a description. If the message didn't give one, ask for it
     # first — we'll confirm once we have it.
     if not (extraction.title or "").strip():
-        pending.set(msg.chat_id, msg.sender_jid, "description", expense_payload, display)
+        pending.set(msg.chat_id, msg.sender_jid, "description", [expense_payload], display)
         _reply(msg, "📝 ¿De qué fue el gasto? Pasame una descripción cortita.")
         return
 
     # Ask for confirmation before saving anything.
-    _present_confirmation(msg, expense_payload, display)
+    _present_confirmation(msg, [expense_payload], display)
+
+
+# --- multi-payer -----------------------------------------------------------
+
+
+def _process_multi_payer(
+    msg: InboundGroupMessage,
+    extraction,
+    participants: list[dict],
+    categories: list[dict],
+    link: dict,
+    sender_pid: str | None,
+    group_id: str,
+    today: str,
+) -> None:
+    """"A pagó el 30% y B el 70%": propose one expense per payer.
+
+    Each payer's contribution goes through the normal single-expense pipeline
+    (split, FX, preview), and the whole set is confirmed or discarded as one
+    unit. The first expense keeps the bare message id as ``externalId`` (so
+    reply-to-edit and dedupe keep working); the rest get a ``#N`` suffix —
+    they're still idempotent on retries but can only be corrected from the web.
+    """
+    # An exact-amount split can't be copied onto each sub-expense (the parts
+    # sum to the FULL total, not to one payer's slice) — don't guess.
+    if extraction.split_mode == "BY_AMOUNT" and extraction.split_parts:
+        _reply(
+            msg,
+            "✋ No puedo con varios pagadores Y montos exactos por persona a la "
+            "vez. Cargalo como gastos separados, uno por pagador.",
+        )
+        return
+
+    payer_people: list[dict] = []
+    seen_ids: set[str] = set()
+    for part in extraction.payers:
+        p = match_participant(part.name, participants)
+        if not p:
+            _reply(msg, f"No reconozco a *{part.name}*. ¿Quiénes pagaron?")
+            return
+        if p["id"] in seen_ids:
+            _reply(
+                msg,
+                f"*{p['name']}* aparece dos veces como pagador 🤔. ¿Me lo pasás de nuevo?",
+            )
+            return
+        seen_ids.add(p["id"])
+        payer_people.append(p)
+
+    # What each payer put in, in original-currency cents. Same philosophy as
+    # splits: the LLM transcribed the literal numbers, the math happens here.
+    total_cents = round(extraction.amount * 100)
+    values = [
+        round(part.value * 100) if part.value is not None else None
+        for part in extraction.payers
+    ]
+    try:
+        if extraction.payer_mode == "BY_PERCENTAGE":
+            bps = fill_remainder(10000, values)
+            contributions = [round(total_cents * bp / 10000) for bp in bps]
+            # Per-payer rounding can leave the sum a hair off; the largest
+            # contribution absorbs it (same rule as convert_shares).
+            diff = total_cents - sum(contributions)
+            if diff:
+                contributions[contributions.index(max(contributions))] += diff
+        else:  # BY_AMOUNT
+            contributions = fill_remainder(total_cents, values)
+    except SplitError as e:
+        if e.reason in ("sum_exceeds_total", "sum_mismatch"):
+            explicit = sum(v for v in values if v is not None) / 100
+            if extraction.payer_mode == "BY_PERCENTAGE":
+                _reply(
+                    msg,
+                    f"Lo pagado suma {explicit:g}% pero tiene que sumar 100% 🤔. "
+                    "¿Me pasás de nuevo cuánto puso cada uno?",
+                )
+            else:
+                currency = (extraction.currency or "CLP").upper()
+                _reply(
+                    msg,
+                    f"Lo que pusieron suma {explicit:g} pero el total es "
+                    f"{extraction.amount:g} {currency} 🤔. ¿Me pasás de nuevo "
+                    "cuánto puso cada uno?",
+                )
+        else:
+            _reply(msg, "Con esos números a un pagador le queda $0 🤔. ¿Cuánto puso cada uno?")
+        return
+    if any(c <= 0 for c in contributions):
+        _reply(msg, "Con esos números a un pagador le queda $0 🤔. ¿Cuánto puso cada uno?")
+        return
+
+    category_id = cats.resolve(extraction.category, categories)
+    payloads: list[dict] = []
+    displays: list[dict] = []
+    for i, (payer, cents) in enumerate(zip(payer_people, contributions)):
+        sub = extraction.model_copy(
+            update={"amount": cents / 100, "paid_by_name": payer["name"], "payers": []}
+        )
+        try:
+            resolved = _resolve_expense_fields(sub, participants, link, sender_pid)
+        except _ResolveError as e:
+            _reply(msg, e.reply)
+            return
+        payload: dict = {
+            "groupId": group_id,
+            "title": (extraction.title or "").strip() or "Gasto",
+            "amount": resolved["usd_cents"],
+            "category": category_id,
+            "paidById": resolved["paid_by_id"],
+            "paidForIds": [p["id"] for p in resolved["paid_for"]],
+            "splitMode": resolved["split_mode"],
+            "expenseDate": extraction.date or today,
+            "source": "whatsapp",
+            "externalId": msg.message_id if i == 0 else f"{msg.message_id}#{i + 1}",
+            "createdByParticipantId": sender_pid,
+        }
+        if resolved["shares"] is not None:
+            payload["shares"] = resolved["shares"]
+        payload.update(_original_currency_fields(resolved))
+        payloads.append(payload)
+        displays.append(_build_display(sub, resolved, participants, category_id))
+
+    display = {"multi": displays, "title": (extraction.title or "").strip()}
+
+    if not (extraction.title or "").strip():
+        pending.set(msg.chat_id, msg.sender_jid, "description", payloads, display)
+        _reply(msg, "📝 ¿De qué fue el gasto? Pasame una descripción cortita.")
+        return
+
+    _present_confirmation(msg, payloads, display)
 
 
 # --- voice notes -----------------------------------------------------------
@@ -410,11 +570,18 @@ def _resolve_expense_fields(
         # Names are matched against the FULL roster, not just the active subset:
         # someone who already left (or hasn't arrived) can still have fronted
         # money or owe a share, and naming them explicitly must keep working.
+        # Duplicates (e.g. an alias plus the canonical name, seen in production
+        # with "…y el resto para mí") merge silently — unlike split_parts, an
+        # EVENLY duplicate carries no number that could get lost.
         paid_for = []
+        dedupe_ids: set[str] = set()
         for name in extraction.paid_for_names:
             p = match_participant(name, participants)
             if not p:
                 raise _ResolveError(f"No reconozco a *{name}* en el grupo.")
+            if p["id"] in dedupe_ids:
+                continue
+            dedupe_ids.add(p["id"])
             paid_for.append(p)
     else:
         paid_for = active_participants(participants)
@@ -544,7 +711,6 @@ def _process_edit(
     categories = data.get("categories", [])
     today = date.today().isoformat()
     name_by_id = {p["id"]: p["name"] for p in participants}
-    cat_by_id = {c["id"]: c["name"] for c in categories}
 
     # Describe the current expense in the user's original currency for the LLM.
     if target.get("originalCurrency"):
@@ -561,7 +727,9 @@ def _process_edit(
         "paid_for_names": [
             name_by_id[i] for i in target.get("paidForIds", []) if i in name_by_id
         ],
-        "category": cat_by_id.get(target.get("categoryId")),
+        # Spanish label, so "categoría actual" speaks the same language as the
+        # "categorías disponibles" menu (the DB stores spliit's English names).
+        "category": cats.label(target.get("categoryId") or 0, with_emoji=False),
         "date": target.get("expenseDate"),
         "split_mode": target.get("splitMode") or "EVENLY",
         "split_desc": _current_split_desc(target, name_by_id, cur_currency),
@@ -573,7 +741,7 @@ def _process_edit(
         msg.sender_name,
         participants,
         SUPPORTED_CURRENCIES,
-        [c["name"] for c in categories],
+        cats.prompt_names(),
         today,
     )
     if extraction is None:
@@ -582,6 +750,14 @@ def _process_edit(
 
     # Not actually a correction (a comment/emoji/thanks) — stay quiet.
     if extraction.message_type != "expense":
+        return
+    extraction.amount = guards.fix_thousands_misread(extraction.amount, text)
+    if len(extraction.payers) > 1:
+        _reply(
+            msg,
+            "✋ Cada gasto tiene un solo pagador. Para repartir lo pagado entre "
+            "varios, cargalo como gastos separados.",
+        )
         return
     if extraction.confidence < settings.confidence_threshold or not extraction.amount:
         question = extraction.clarification_needed or "¿Qué querés corregir del gasto?"
@@ -652,11 +828,12 @@ def _process_edit(
         resolved["split_mode"] = target_mode
         resolved["shares"] = target_shares
 
+    category_id = cats.resolve(extraction.category, categories)
     edit_payload: dict = {
         "groupId": group_id,
         "title": extraction.title or target.get("title") or "Gasto",
         "amount": resolved["usd_cents"],
-        "category": _resolve_category(extraction.category, categories),
+        "category": category_id,
         "paidById": resolved["paid_by_id"],
         "paidForIds": [p["id"] for p in resolved["paid_for"]],
         "splitMode": resolved["split_mode"],
@@ -674,7 +851,7 @@ def _process_edit(
         _reply(msg, "No pude actualizar el gasto 😞. Probá de nuevo.")
         return
 
-    confirmation = _confirmation(extraction, resolved, participants, edited=True)
+    confirmation = _confirmation(extraction, resolved, participants, category_id, edited=True)
     conf_id = _reply(msg, confirmation)
     # Link the new confirmation so a further reply keeps editing the same expense.
     if conf_id:
@@ -702,16 +879,6 @@ def _maybe_roast(
     result = roast_joke(msg.text, sender_name)
     if result and result.is_joke and result.roast and result.roast.strip():
         _reply(msg, result.roast.strip())
-
-
-def _resolve_category(name: str | None, categories: list[dict]) -> int:
-    if not name:
-        return 0
-    target = normalize_name(name)
-    for c in categories:
-        if normalize_name(c["name"]) == target:
-            return c["id"]
-    return 0
 
 
 # --- confirmation flow -----------------------------------------------------
@@ -771,11 +938,15 @@ def _handle_pending(msg: InboundGroupMessage, pend: pending.Pending) -> bool:
             pending.clear(msg.chat_id, msg.sender_jid)
             _reply(msg, "❌ Listo, lo descarté.")
             return True
-        # Use the message as the description, then ask to confirm.
+        # Use the message as the description, then ask to confirm. A multi-payer
+        # proposal shares one description across all its sub-expenses.
         description = text[:80].strip() or "Gasto"
-        pend.payload["title"] = description
+        for payload in pend.payloads:
+            payload["title"] = description
         pend.display["title"] = description
-        _present_confirmation(msg, pend.payload, pend.display)
+        for sub in pend.display.get("multi") or []:
+            sub["title"] = description
+        _present_confirmation(msg, pend.payloads, pend.display)
         return True
 
     # stage == "confirmation"
@@ -789,15 +960,23 @@ def _handle_pending(msg: InboundGroupMessage, pend: pending.Pending) -> bool:
     return False  # not a sí/no — let the caller treat it as a new message
 
 
-def _present_confirmation(msg: InboundGroupMessage, payload: dict, display: dict) -> None:
-    pending.set(msg.chat_id, msg.sender_jid, "confirmation", payload, display)
+def _present_confirmation(
+    msg: InboundGroupMessage, payloads: list[dict], display: dict
+) -> None:
+    pending.set(msg.chat_id, msg.sender_jid, "confirmation", payloads, display)
     _reply(msg, _preview_text(display))
 
 
 def _confirm_and_save(msg: InboundGroupMessage, pend: pending.Pending) -> None:
-    """Create the confirmed expense, then only react to the confirming message."""
+    """Create the confirmed expense(s), then only react to the confirming message.
+
+    A partial failure keeps the proposal so a follow-up "sí" retries the whole
+    list — the web endpoint is idempotent on (source, externalId), so the
+    already-saved ones come back as no-ops instead of duplicates.
+    """
     try:
-        web.create_expense(pend.payload)
+        for payload in pend.payloads:
+            web.create_expense(payload)
     except Exception:
         logger.exception("create_expense failed")
         # Keep the proposal so a follow-up "sí" can retry after a transient error.
@@ -881,7 +1060,9 @@ def _breakdown_lines(breakdown: list[dict], currency: str) -> str:
     return "\n".join(lines)
 
 
-def _build_display(extraction, resolved: dict, participants: list[dict]) -> dict:
+def _build_display(
+    extraction, resolved: dict, participants: list[dict], category_id: int = 0
+) -> dict:
     """Snapshot the fields needed to render the confirmation preview later."""
     name_by_id = {p["id"]: p["name"] for p in participants}
     among = _among_label(resolved["paid_for"], participants)
@@ -894,6 +1075,7 @@ def _build_display(extraction, resolved: dict, participants: list[dict]) -> dict
         "payer_name": name_by_id.get(resolved["paid_by_id"], "alguien"),
         "among": among,
         "breakdown": _build_breakdown(resolved),
+        "category_label": cats.label(category_id),
         "split_warning": (
             "⚠️ Todavía no sé dividir por partes; lo propongo en partes iguales."
             if extraction.split_mode == "BY_SHARES"
@@ -910,10 +1092,11 @@ def _suspicious_line(payer_name: str) -> str | None:
     return None
 
 
-def _preview_text(display: dict) -> str:
-    """The 'voy a registrar… ¿confirmo?' message shown before saving."""
+def _expense_lines(display: dict) -> str:
+    """One expense's body: amount, payer/split, category. Shared between the
+    single preview and each entry of a multi-payer preview."""
     title = display["title"] or "Gasto"
-    line = f"📝 Voy a registrar: {format_money(display['usd_cents'])} — {title}"
+    line = f"{format_money(display['usd_cents'])} — {title}"
     if display["currency"] != "USD":
         line += f" ({display['amount']:g} {display['currency']} @ {display['fx_label']})"
     breakdown = display.get("breakdown")
@@ -922,8 +1105,28 @@ def _preview_text(display: dict) -> str:
         line += f"\n{_breakdown_lines(breakdown, display['currency'])}"
     else:
         line += f"\nPagó {display['payer_name']}, dividido entre {display['among']}."
+    if display.get("category_label"):
+        line += f"\n🏷️ {display['category_label']}"
     if display.get("split_warning"):
         line += f"\n{display['split_warning']}"
+    return line
+
+
+def _preview_text(display: dict) -> str:
+    """The 'voy a registrar… ¿confirmo?' message shown before saving."""
+    subs = display.get("multi")
+    if subs:
+        parts = [f"📝 Son varios pagadores, voy a registrar {len(subs)} gastos:"]
+        for i, sub in enumerate(subs, 1):
+            parts.append(f"\n{i}. {_expense_lines(sub)}")
+        for payer in dict.fromkeys(s["payer_name"] for s in subs):  # ordered unique
+            susp = _suspicious_line(payer)
+            if susp:
+                parts.append(f"\n{susp}")
+        parts.append("\n\n¿Los confirmo? Respondé *sí* o *no*.")
+        return "\n".join(parts)
+
+    line = f"📝 Voy a registrar: {_expense_lines(display)}"
     susp = _suspicious_line(display["payer_name"])
     if susp:
         line += f"\n{susp}"
@@ -931,7 +1134,7 @@ def _preview_text(display: dict) -> str:
     return line
 
 
-def _confirmation(extraction, resolved: dict, participants, edited=False) -> str:
+def _confirmation(extraction, resolved: dict, participants, category_id: int = 0, edited=False) -> str:
     name_by_id = {p["id"]: p["name"] for p in participants}
     payer = name_by_id.get(resolved["paid_by_id"], "alguien")
     title = extraction.title or "Gasto"
@@ -946,6 +1149,7 @@ def _confirmation(extraction, resolved: dict, participants, edited=False) -> str
     else:
         among = _among_label(resolved["paid_for"], participants)
         line += f"\nPagó {payer}, dividido entre {among}."
+    line += f"\n🏷️ {cats.label(category_id)}"
     susp = _suspicious_line(payer)
     if susp:
         line += f"\n{susp}"

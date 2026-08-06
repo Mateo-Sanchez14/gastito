@@ -8,6 +8,38 @@ from pydantic import BaseModel, Field, field_validator
 
 SplitMode = Literal["EVENLY", "BY_SHARES", "BY_PERCENTAGE", "BY_AMOUNT"]
 MessageType = Literal["expense", "command", "chitchat"]
+PayerMode = Literal["BY_AMOUNT", "BY_PERCENTAGE"]
+
+
+def _clean_parts_list(value):
+    """Shared tolerance for lists of {name, value}: discard the WHOLE list on
+    any malformed entry instead of failing the extraction. Never salvage a
+    partial list — a missing person would be saved silently wrong, while []
+    falls back to a path where the user can catch it."""
+    if value is None or value == "":
+        return []
+    if not isinstance(value, list):
+        return []
+    cleaned = []
+    for entry in value:
+        if isinstance(entry, SplitPart):
+            cleaned.append(entry)
+            continue
+        if not isinstance(entry, dict):
+            return []
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return []
+        amount = entry.get("value")
+        if isinstance(amount, str):
+            try:
+                amount = float(amount.replace(",", "."))
+            except ValueError:
+                return []
+        if amount is not None and not isinstance(amount, (int, float)):
+            return []
+        cleaned.append({"name": name, "value": amount})
+    return cleaned
 
 
 class SplitPart(BaseModel):
@@ -38,6 +70,11 @@ class ExpenseExtraction(BaseModel):
     split_parts: list[SplitPart] = Field(
         default_factory=list, description="Per-person values for BY_AMOUNT/BY_PERCENTAGE"
     )
+    payers: list[SplitPart] = Field(
+        default_factory=list,
+        description="Every payer when MORE than one person paid; empty otherwise",
+    )
+    payer_mode: PayerMode = "BY_AMOUNT"
     category: Optional[str] = None
     date: Optional[str] = Field(default=None, description="ISO date YYYY-MM-DD; default today")
     confidence: float = 0.0
@@ -59,40 +96,25 @@ class ExpenseExtraction(BaseModel):
             return value
         return "EVENLY"
 
-    @field_validator("split_parts", mode="before")
+    @field_validator("split_parts", "payers", mode="before")
     @classmethod
-    def _tolerate_malformed_split_parts(cls, value):
+    def _tolerate_malformed_parts(cls, value):
         """Discard the whole list on any malformed entry instead of failing.
 
         Same spirit as ``_tolerate_blank_split_mode``: a noisy model must not
         sink the entire extraction. But never salvage a partial list — a split
-        missing one person would be saved silently wrong, while ``[]`` falls
-        back to the EVENLY preview where the user can catch it and say "no".
+        (or payer set) missing one person would be saved silently wrong, while
+        ``[]`` falls back to a preview where the user can catch it and say "no".
         """
-        if value is None or value == "":
-            return []
-        if not isinstance(value, list):
-            return []
-        cleaned = []
-        for entry in value:
-            if isinstance(entry, SplitPart):
-                cleaned.append(entry)
-                continue
-            if not isinstance(entry, dict):
-                return []
-            name = entry.get("name")
-            if not isinstance(name, str) or not name.strip():
-                return []
-            amount = entry.get("value")
-            if isinstance(amount, str):
-                try:
-                    amount = float(amount.replace(",", "."))
-                except ValueError:
-                    return []
-            if amount is not None and not isinstance(amount, (int, float)):
-                return []
-            cleaned.append({"name": name, "value": amount})
-        return cleaned
+        return _clean_parts_list(value)
+
+    @field_validator("payer_mode", mode="before")
+    @classmethod
+    def _tolerate_blank_payer_mode(cls, value):
+        """A missing/blank/unknown payer_mode means "no opinion", not a failure."""
+        if value in get_args(PayerMode):
+            return value
+        return "BY_AMOUNT"
 
 
 class RoastResult(BaseModel):
@@ -144,7 +166,13 @@ Respondé ÚNICAMENTE con un objeto JSON (sin texto alrededor, sin markdown) con
   es BY_AMOUNT o BY_PERCENTAGE; si no, []. En BY_AMOUNT value es el monto en la MISMA
   moneda del total, unidades mayores; en BY_PERCENTAGE es el porcentaje (0-100).
   null = esa persona se lleva el resto.
-- category: string
+- payers: array de objetos {"name": string, "value": number|null}. Vacío CASI SIEMPRE.
+  SOLO si el mensaje dice que pagó MÁS de una persona ("A y B pagamos...", "A pagó el 30%
+  y B el 70%"), poné acá a TODOS los pagadores con lo que puso cada uno, transcribiendo los
+  números tal cual (sin aritmética; null = el resto / no se aclara).
+- payer_mode: "BY_AMOUNT" | "BY_PERCENTAGE" (cómo leer los value de payers; BY_PERCENTAGE
+  si son porcentajes de lo pagado)
+- category: string (una de las categorías provistas)
 - date: string (YYYY-MM-DD)
 - confidence: number (0..1)
 - clarification_needed: string (la pregunta a hacer si algo esencial es ambiguo; "" si no)

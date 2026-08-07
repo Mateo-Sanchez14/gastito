@@ -8,7 +8,18 @@
     }
   },
   "Header": {
-    "groups": "Grupos"
+    "groups": "Grupos",
+    "logout": "Cerrar sesión"
+  },
+  "Login": {
+    "title": "Iniciar sesión",
+    "description": "Este gastito es privado: poné el usuario y la contraseña compartidos.",
+    "username": "Usuario",
+    "password": "Contraseña",
+    "submit": "Entrar",
+    "remembered": "La sesión queda guardada en este dispositivo.",
+    "invalid": "Usuario o contraseña incorrectos.",
+    "throttled": "Demasiados intentos. Probá de nuevo en unos minutos."
   },
   "Footer": {
     "madeIn": "Hecho en Montréal, Québec 🇨🇦",

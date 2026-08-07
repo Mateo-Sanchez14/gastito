@@ -224,13 +224,26 @@ ssh root@msanchez.me 'cd /srv/gastito && git pull && \
   find /srv/gastito/gowa/statics/media -type f -mtime +7 -delete
   ```
 - **Gowa es no oficial** (riesgo de ban de WhatsApp). Usá un número dedicado.
-- **Login de la web:** la UI está detrás de un usuario/contraseña compartido
-  (Basic Auth), uno solo para todo el grupo. Se setea con `WEB_BASIC_AUTH_USER`
-  y `WEB_BASIC_AUTH_PASS`; si los dejás vacíos no pide login (útil en local). El
-  navegador lo pide una vez y lo recuerda. Para cambiar la clave editás el env y
-  recreás el contenedor (`docker compose ... up -d web`) — se lee en runtime, no
-  hace falta rebuild. Los endpoints del bot (`/api/bot/*`) y los health checks
-  quedan exentos (tienen su propia auth).
+- **Login de la web:** la UI está detrás de un usuario/contraseña compartido, uno
+  solo para todo el grupo. Se setea con `WEB_BASIC_AUTH_USER` y
+  `WEB_BASIC_AUTH_PASS`; si los dejás vacíos no pide login (útil en local). Para
+  cambiar la clave editás el env y recreás el contenedor
+  (`docker compose ... up -d web`) — se lee en runtime, no hace falta rebuild.
+  Los endpoints del bot (`/api/bot/*`) y los health checks quedan exentos
+  (tienen su propia auth).
+- **La sesión queda guardada un año:** entrás una vez por `/login` y el server
+  deja una cookie firmada (HttpOnly, `Secure` detrás de Caddy) que se renueva
+  sola cada vez que usás la app. Es para no reloguearte desde el celular:
+  antes esto era Basic Auth y el navegador la volvía a pedir cada vez que
+  cerrabas la sesión de navegación. Detalles:
+  - Para salir, el botón de cerrar sesión arriba a la derecha.
+  - **Cambiar la contraseña cierra todas las sesiones**: la cookie se firma con
+    una clave derivada del usuario/clave, así que rotarla invalida las viejas.
+  - Sigue aceptando el header `Authorization: Basic` (o sea, `curl -u` y los
+    navegadores que ya la tenían guardada siguen andando; en el primer request
+    reciben la cookie y dejan de necesitarlo).
+  - 10 intentos fallidos desde una misma IP bloquean el login 15 minutos. El
+    contador vive en memoria: reiniciar el contenedor lo borra.
 - **Auth liviana, no fuerte:** cualquiera con el login de la web —o que esté en
   el grupo de WhatsApp— puede cargar gastos. Pensado para un grupo de amigos de
   confianza, no para datos sensibles.

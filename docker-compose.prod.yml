@@ -18,9 +18,9 @@ services:
       POSTGRES_URL_NON_POOLING: ${DATABASE_URL}
       NEXT_PUBLIC_DEFAULT_CURRENCY_CODE: ${NEXT_PUBLIC_DEFAULT_CURRENCY_CODE:-USD}
       BOT_INGEST_SECRET: ${BOT_INGEST_SECRET}
-      # gastito: shared user/pass that gates the whole web UI (Basic Auth).
-      # Unset = no gate. Read at runtime; changing them needs `up -d` (recreate),
-      # not a rebuild.
+      # gastito: shared user/pass that gates the whole web UI. Unset = no gate.
+      # Read at runtime; changing them needs `up -d` (recreate), not a rebuild —
+      # and closes every open session (the session cookie is signed with them).
       WEB_BASIC_AUTH_USER: ${WEB_BASIC_AUTH_USER:-}
       WEB_BASIC_AUTH_PASS: ${WEB_BASIC_AUTH_PASS:-}
     labels:

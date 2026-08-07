@@ -8,7 +8,18 @@
     }
   },
   "Header": {
-    "groups": "Groups"
+    "groups": "Groups",
+    "logout": "Log out"
+  },
+  "Login": {
+    "title": "Log in",
+    "description": "This gastito is private: enter the shared username and password.",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Log in",
+    "remembered": "You will stay logged in on this device.",
+    "invalid": "Wrong username or password.",
+    "throttled": "Too many attempts. Try again in a few minutes."
   },
   "Footer": {
     "madeIn": "Made in Montréal, Québec 🇨🇦",

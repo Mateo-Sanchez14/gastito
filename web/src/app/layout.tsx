@@ -6,10 +6,17 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/toaster'
 import { env } from '@/lib/env'
+import {
+  SESSION_COOKIE_NAME,
+  getGateCredentials,
+  verifySessionToken,
+} from '@/lib/web-auth'
 import { TRPCProvider } from '@/trpc/client'
+import { LogOut } from 'lucide-react'
 import type { Metadata, Viewport } from 'next'
 import { NextIntlClientProvider, useTranslations } from 'next-intl'
 import { getLocale, getMessages } from 'next-intl/server'
+import { cookies } from 'next/headers'
 import Image from 'next/image'
 import Link from 'next/link'
 import { Suspense } from 'react'
@@ -63,7 +70,13 @@ export const viewport: Viewport = {
   themeColor: '#047857',
 }
 
-function Content({ children }: { children: React.ReactNode }) {
+function Content({
+  children,
+  loggedIn,
+}: {
+  children: React.ReactNode
+  loggedIn: boolean
+}) {
   const t = useTranslations()
   return (
     <TRPCProvider>
@@ -100,6 +113,25 @@ function Content({ children }: { children: React.ReactNode }) {
             <li>
               <ThemeToggle />
             </li>
+            {/* gastito: only shown when there is a session to end (so it stays
+                out of the way on /login, and never appears when the gate is
+                off). Plain form post, so it needs no client JS. */}
+            {loggedIn && (
+              <li>
+                <form action="/api/auth/logout" method="post">
+                  <Button
+                    type="submit"
+                    variant="ghost"
+                    size="icon"
+                    className="text-primary"
+                    title={t('Header.logout')}
+                  >
+                    <LogOut className="h-[1.2rem] w-[1.2rem]" />
+                    <span className="sr-only">{t('Header.logout')}</span>
+                  </Button>
+                </form>
+              </li>
+            )}
           </ul>
         </div>
       </header>
@@ -154,6 +186,13 @@ export default async function RootLayout({
 }) {
   const locale = await getLocale()
   const messages = await getMessages()
+  const creds = getGateCredentials()
+  const loggedIn =
+    creds !== null &&
+    (await verifySessionToken(
+      (await cookies()).get(SESSION_COOKIE_NAME)?.value,
+      creds,
+    )) !== null
   return (
     <html lang={locale} suppressHydrationWarning>
       <ApplePwaSplash icon="/logo-with-text.png" color="#027756" />
@@ -168,7 +207,7 @@ export default async function RootLayout({
             <Suspense>
               <ProgressBar />
             </Suspense>
-            <Content>{children}</Content>
+            <Content loggedIn={loggedIn}>{children}</Content>
           </ThemeProvider>
         </NextIntlClientProvider>
       </body>

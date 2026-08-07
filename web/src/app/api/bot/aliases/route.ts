@@ -18,13 +18,16 @@ export async function POST(req: Request) {
   } | null
   if (!body?.groupId || !body?.participantId || !body?.aliases?.length) {
     return Response.json(
-      { error: 'groupId, participantId and a non-empty aliases[] are required' },
+      {
+        error: 'groupId, participantId and a non-empty aliases[] are required',
+      },
       { status: 400 },
     )
   }
 
   const group = await getGroup(body.groupId)
-  if (!group) return Response.json({ error: 'unknown groupId' }, { status: 404 })
+  if (!group)
+    return Response.json({ error: 'unknown groupId' }, { status: 404 })
   if (!group.participants.some((p) => p.id === body.participantId)) {
     return Response.json(
       { error: 'participantId does not belong to this group' },
@@ -32,6 +35,10 @@ export async function POST(req: Request) {
     )
   }
 
-  const result = await addAliases(body.groupId, body.participantId, body.aliases)
+  const result = await addAliases(
+    body.groupId,
+    body.participantId,
+    body.aliases,
+  )
   return Response.json(result, { status: 201 })
 }

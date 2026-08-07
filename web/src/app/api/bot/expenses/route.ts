@@ -1,11 +1,11 @@
 import { createExpense, getGroup } from '@/lib/api'
+import { getExpenseByExternalId } from '@/lib/bot'
 import {
   BotExpensePayload,
   buildExpenseFormValues,
   requireBotAuth,
   validateBotSplit,
 } from '@/lib/bot-auth'
-import { getExpenseByExternalId } from '@/lib/bot'
 
 // gastito: bot ingestion endpoint. Creates an expense from a payload the
 // WhatsApp bot has already resolved (participant ids + group-currency cents).
@@ -32,7 +32,10 @@ export async function POST(req: Request) {
     )
   }
   if (!payload.paidForIds?.length) {
-    return Response.json({ error: 'paidForIds must be non-empty' }, { status: 400 })
+    return Response.json(
+      { error: 'paidForIds must be non-empty' },
+      { status: 400 },
+    )
   }
   const splitError = validateBotSplit(payload)
   if (splitError) {
@@ -73,7 +76,10 @@ export async function POST(req: Request) {
     if (externalId && message.includes('Unique constraint')) {
       const existing = await getExpenseByExternalId(source, externalId)
       if (existing)
-        return Response.json({ expense: existing, idempotent: true }, { status: 200 })
+        return Response.json(
+          { expense: existing, idempotent: true },
+          { status: 200 },
+        )
     }
     return Response.json({ error: message }, { status: 400 })
   }

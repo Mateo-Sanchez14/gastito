@@ -20,47 +20,81 @@ describe('validateBotSplit', () => {
 
   it('accepts a BY_AMOUNT split summing to amount', () => {
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_AMOUNT', shares: [696, 1067, 1227] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_AMOUNT',
+        shares: [696, 1067, 1227],
+      }),
     ).toBeNull()
   })
 
   it('rejects BY_AMOUNT without shares', () => {
-    expect(validateBotSplit({ ...base, splitMode: 'BY_AMOUNT' })).toMatch(/aligned/)
+    expect(validateBotSplit({ ...base, splitMode: 'BY_AMOUNT' })).toMatch(
+      /aligned/,
+    )
   })
 
   it('rejects BY_AMOUNT shares misaligned with paidForIds', () => {
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_AMOUNT', shares: [696, 2294] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_AMOUNT',
+        shares: [696, 2294],
+      }),
     ).toMatch(/aligned/)
   })
 
   it('rejects zero or negative or fractional shares', () => {
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_AMOUNT', shares: [0, 1763, 1227] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_AMOUNT',
+        shares: [0, 1763, 1227],
+      }),
     ).toMatch(/positive integers/)
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_AMOUNT', shares: [-1, 1764, 1227] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_AMOUNT',
+        shares: [-1, 1764, 1227],
+      }),
     ).toMatch(/positive integers/)
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_AMOUNT', shares: [696.5, 1066.5, 1227] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_AMOUNT',
+        shares: [696.5, 1066.5, 1227],
+      }),
     ).toMatch(/positive integers/)
   })
 
   it('rejects BY_AMOUNT shares not summing to amount', () => {
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_AMOUNT', shares: [696, 1067, 1228] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_AMOUNT',
+        shares: [696, 1067, 1228],
+      }),
     ).toMatch(/must sum to 2990/)
   })
 
   it('accepts a BY_PERCENTAGE split summing to 10000 bp', () => {
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_PERCENTAGE', shares: [7000, 1500, 1500] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_PERCENTAGE',
+        shares: [7000, 1500, 1500],
+      }),
     ).toBeNull()
   })
 
   it('rejects BY_PERCENTAGE not summing to 10000 bp', () => {
     expect(
-      validateBotSplit({ ...base, splitMode: 'BY_PERCENTAGE', shares: [7000, 1500, 1000] }),
+      validateBotSplit({
+        ...base,
+        splitMode: 'BY_PERCENTAGE',
+        shares: [7000, 1500, 1000],
+      }),
     ).toMatch(/must sum to 10000/)
   })
 })

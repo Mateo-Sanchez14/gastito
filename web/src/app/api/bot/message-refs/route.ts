@@ -26,12 +26,18 @@ export async function GET(req: Request) {
 
   const expenseId = await getExpenseIdByMessage(messageId)
   if (!expenseId) {
-    return Response.json({ error: 'no expense for that message' }, { status: 404 })
+    return Response.json(
+      { error: 'no expense for that message' },
+      { status: 404 },
+    )
   }
   const expense = await getBotExpenseDetail(expenseId)
   if (!expense) {
     // The ref outlived its expense (deleted). Treat as not-found.
-    return Response.json({ error: 'no expense for that message' }, { status: 404 })
+    return Response.json(
+      { error: 'no expense for that message' },
+      { status: 404 },
+    )
   }
   return Response.json({ expense })
 }

@@ -126,7 +126,11 @@ export async function getGroupLinkByChatId(
 ): Promise<GroupLink | null> {
   const link = await prisma.whatsAppGroupLink.findUnique({ where: { chatId } })
   if (!link) return null
-  return { chatId: link.chatId, groupId: link.groupId, fxArsSource: link.fxArsSource }
+  return {
+    chatId: link.chatId,
+    groupId: link.groupId,
+    fxArsSource: link.fxArsSource,
+  }
 }
 
 /** Create or update the link between a WhatsApp group and a spliit Group. */
@@ -140,7 +144,11 @@ export async function upsertGroupLink(
     create: { chatId, groupId, ...(fxArsSource ? { fxArsSource } : {}) },
     update: { groupId, ...(fxArsSource ? { fxArsSource } : {}) },
   })
-  return { chatId: link.chatId, groupId: link.groupId, fxArsSource: link.fxArsSource }
+  return {
+    chatId: link.chatId,
+    groupId: link.groupId,
+    fxArsSource: link.fxArsSource,
+  }
 }
 
 /** Update just the ARS quote source for a linked group (the /cotizacion command). */
@@ -182,7 +190,10 @@ export async function upsertMember(
 }
 
 /** Idempotency lookup: has this Gowa message already produced an expense? */
-export async function getExpenseByExternalId(source: string, externalId: string) {
+export async function getExpenseByExternalId(
+  source: string,
+  externalId: string,
+) {
   return prisma.expense.findUnique({
     where: { source_externalId: { source, externalId } },
   })
@@ -285,7 +296,11 @@ export async function getLastBotExpenseByParticipant(
   participantId: string,
 ): Promise<{ id: string; title: string } | null> {
   const activities = await prisma.activity.findMany({
-    where: { groupId, participantId, activityType: ActivityType.CREATE_EXPENSE },
+    where: {
+      groupId,
+      participantId,
+      activityType: ActivityType.CREATE_EXPENSE,
+    },
     orderBy: { time: 'desc' },
     take: 20,
   })

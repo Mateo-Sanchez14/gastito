@@ -18,7 +18,10 @@ export async function GET(req: Request) {
 
   const chatId = new URL(req.url).searchParams.get('chatId')
   if (!chatId) {
-    return Response.json({ error: 'chatId query param is required' }, { status: 400 })
+    return Response.json(
+      { error: 'chatId query param is required' },
+      { status: 400 },
+    )
   }
   const link = await getGroupLinkByChatId(chatId)
   if (!link) return Response.json({ error: 'not linked' }, { status: 404 })
@@ -35,7 +38,10 @@ export async function POST(req: Request) {
     fxArsSource?: string
   } | null
   if (!body?.chatId || !body?.groupId) {
-    return Response.json({ error: 'chatId and groupId are required' }, { status: 400 })
+    return Response.json(
+      { error: 'chatId and groupId are required' },
+      { status: 400 },
+    )
   }
   if (body.fxArsSource && !FX_SOURCES.includes(body.fxArsSource)) {
     return Response.json(
@@ -44,9 +50,14 @@ export async function POST(req: Request) {
     )
   }
   const group = await getGroup(body.groupId)
-  if (!group) return Response.json({ error: 'unknown groupId' }, { status: 404 })
+  if (!group)
+    return Response.json({ error: 'unknown groupId' }, { status: 404 })
 
-  const link = await upsertGroupLink(body.chatId, body.groupId, body.fxArsSource)
+  const link = await upsertGroupLink(
+    body.chatId,
+    body.groupId,
+    body.fxArsSource,
+  )
   return Response.json({ link })
 }
 

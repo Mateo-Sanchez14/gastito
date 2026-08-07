@@ -82,7 +82,9 @@ export function buildExpenseFormValues(
   }))
 
   return {
-    expenseDate: payload.expenseDate ? new Date(payload.expenseDate) : new Date(),
+    expenseDate: payload.expenseDate
+      ? new Date(payload.expenseDate)
+      : new Date(),
     title: payload.title,
     category: payload.category ?? 0,
     amount: payload.amount,

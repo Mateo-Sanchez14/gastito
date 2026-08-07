@@ -18,6 +18,7 @@ export async function GET(req: Request) {
   }
 
   const expense = await getLastBotExpenseByParticipant(groupId, participantId)
-  if (!expense) return Response.json({ error: 'nothing to undo' }, { status: 404 })
+  if (!expense)
+    return Response.json({ error: 'nothing to undo' }, { status: 404 })
   return Response.json({ expense })
 }

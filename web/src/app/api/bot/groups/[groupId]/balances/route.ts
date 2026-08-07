@@ -1,8 +1,5 @@
 import { getGroup, getGroupExpenses } from '@/lib/api'
-import {
-  getBalances,
-  getSuggestedReimbursements,
-} from '@/lib/balances'
+import { getBalances, getSuggestedReimbursements } from '@/lib/balances'
 import { requireBotAuth } from '@/lib/bot-auth'
 
 // gastito: balances + suggested reimbursements for the `saldo` command.
@@ -23,7 +20,9 @@ export async function GET(
   const expenses = await getGroupExpenses(groupId)
   const balances = getBalances(expenses)
   const reimbursements = getSuggestedReimbursements(balances)
-  const nameById = Object.fromEntries(group.participants.map((p) => [p.id, p.name]))
+  const nameById = Object.fromEntries(
+    group.participants.map((p) => [p.id, p.name]),
+  )
 
   return Response.json({
     group: { id: group.id, name: group.name, currencyCode: group.currencyCode },

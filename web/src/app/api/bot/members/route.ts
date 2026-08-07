@@ -1,5 +1,5 @@
-import { getGroupLinkByChatId, listMembers, upsertMember } from '@/lib/bot'
 import { getGroup } from '@/lib/api'
+import { getGroupLinkByChatId, listMembers, upsertMember } from '@/lib/bot'
 import { requireBotAuth } from '@/lib/bot-auth'
 
 // gastito: sender(JID) -> spliit Participant mapping for a group.
@@ -11,7 +11,10 @@ export async function GET(req: Request) {
 
   const chatId = new URL(req.url).searchParams.get('chatId')
   if (!chatId) {
-    return Response.json({ error: 'chatId query param is required' }, { status: 400 })
+    return Response.json(
+      { error: 'chatId query param is required' },
+      { status: 400 },
+    )
   }
   return Response.json({ members: await listMembers(chatId) })
 }
@@ -35,7 +38,8 @@ export async function POST(req: Request) {
 
   // Validate the participant actually belongs to the linked group.
   const link = await getGroupLinkByChatId(body.chatId)
-  if (!link) return Response.json({ error: 'group not linked' }, { status: 404 })
+  if (!link)
+    return Response.json({ error: 'group not linked' }, { status: 404 })
   const group = await getGroup(link.groupId)
   if (!group?.participants.some((p) => p.id === body.participantId)) {
     return Response.json(

@@ -21,12 +21,18 @@ export async function DELETE(
   const participantId = url.searchParams.get('participantId') ?? undefined
 
   if (!groupId) {
-    return Response.json({ error: 'groupId query param is required' }, { status: 400 })
+    return Response.json(
+      { error: 'groupId query param is required' },
+      { status: 400 },
+    )
   }
 
   const expense = await getExpense(groupId, expenseId)
   if (!expense || expense.groupId !== groupId) {
-    return Response.json({ error: 'expense not found in group' }, { status: 404 })
+    return Response.json(
+      { error: 'expense not found in group' },
+      { status: 404 },
+    )
   }
 
   await deleteExpense(groupId, expenseId, participantId)
@@ -59,7 +65,10 @@ export async function PATCH(
     )
   }
   if (!payload.paidForIds?.length) {
-    return Response.json({ error: 'paidForIds must be non-empty' }, { status: 400 })
+    return Response.json(
+      { error: 'paidForIds must be non-empty' },
+      { status: 400 },
+    )
   }
   const splitError = validateBotSplit(payload)
   if (splitError) {
@@ -68,7 +77,10 @@ export async function PATCH(
 
   const existing = await getExpense(payload.groupId, expenseId)
   if (!existing || existing.groupId !== payload.groupId) {
-    return Response.json({ error: 'expense not found in group' }, { status: 404 })
+    return Response.json(
+      { error: 'expense not found in group' },
+      { status: 404 },
+    )
   }
 
   try {

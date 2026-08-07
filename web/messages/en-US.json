@@ -194,7 +194,6 @@
       "recurrenceRule": {
         "label": "Expense Recurrence",
         "description": "Select how often the expense should repeat.",
-
         "none": "None",
         "daily": "Daily",
         "weekly": "Weekly",
@@ -314,6 +313,21 @@
       "markAsPaid": "Mark as paid"
     }
   },
+  "Summary": {
+    "title": "Summary",
+    "description": "Who was included in each expense, and for how much.",
+    "total": "Total spent",
+    "across": "{expenses, plural, one {# expense} other {# expenses}} · {people, plural, one {# person} other {# people}}",
+    "byParticipant": "By person",
+    "byExpense": "By expense",
+    "you": "you",
+    "expenseCount": "{count, plural, =0 {no expenses} one {# expense} other {# expenses}}",
+    "paidBy": "paid by {name}",
+    "splitBetween": "between {count}",
+    "openExpense": "Open expense",
+    "empty": "No expenses yet.",
+    "reimbursementNote": "Reimbursements are not counted here — see Balances for settlements between people."
+  },
   "Stats": {
     "title": "Stats",
     "Totals": {
@@ -324,6 +338,25 @@
       "yourSpendings": "Your total spendings",
       "yourEarnings": "Your total earnings",
       "yourShare": "Your total share"
+    },
+    "ByCategory": {
+      "title": "By category",
+      "description": "Where the group's money went, biggest first. Reimbursements are left out.",
+      "scopeGroup": "Group",
+      "scopeMine": "Mine",
+      "levelCategory": "Category",
+      "levelGrouping": "Family",
+      "viewChart": "Chart",
+      "viewTable": "Table",
+      "empty": "No expenses to break down yet.",
+      "emptyMine": "You are not included in any expense yet.",
+      "total": "Total",
+      "expenseCount": "Expenses",
+      "average": "Average",
+      "yourShare": "Your share",
+      "amount": "Amount",
+      "share": "Share",
+      "count": "Expenses"
     }
   },
   "Activity": {

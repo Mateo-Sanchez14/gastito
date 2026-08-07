@@ -24,6 +24,14 @@
     --input: 240 5.9% 90%;
     --ring: 142.1 76.2% 36.3%;
     --radius: 0.5rem;
+
+    /* Chart tokens. Single-series (categories are nominal, so bar length —
+       not hue — carries the value). Validated against the card surface:
+       #047756 on #ffffff passes the lightness band, chroma floor and 3:1
+       contrast. `track` is the same hue as a 10% wash, never a gray. */
+    --chart-1: #047756;
+    --chart-1-track: rgb(4 119 86 / 0.12);
+    --chart-grid: hsl(240 5.9% 90%);
   }
 
   .dark {
@@ -47,6 +55,13 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 142.4 71.8% 29.2%;
+
+    /* The dark step is chosen for the dark band, not flipped from the light
+       one: the app's `--primary` (#0bda99) is too light for a fill this size
+       (OKLCH L 0.79, band tops out at 0.67) and glares against the card. */
+    --chart-1: #199e70;
+    --chart-1-track: rgb(25 158 112 / 0.18);
+    --chart-grid: hsl(240 3.7% 15.9%);
   }
 }
 

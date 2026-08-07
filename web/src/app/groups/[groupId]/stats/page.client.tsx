@@ -1,3 +1,4 @@
+import { CategoryBreakdown } from '@/app/groups/[groupId]/stats/category-breakdown'
 import { Totals } from '@/app/groups/[groupId]/stats/totals'
 import {
   Card,
@@ -20,6 +21,16 @@ export function TotalsPageClient() {
         </CardHeader>
         <CardContent className="flex flex-col space-y-4">
           <Totals />
+        </CardContent>
+      </Card>
+
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle>{t('ByCategory.title')}</CardTitle>
+          <CardDescription>{t('ByCategory.description')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CategoryBreakdown />
         </CardContent>
       </Card>
     </>

@@ -4,6 +4,8 @@ import {
   createSessionToken,
   getGateCredentials,
   isSecureRequest,
+  loginPath,
+  redirectToPath,
   sessionCookieOptions,
   shouldRefreshSession,
   verifySessionToken,
@@ -90,12 +92,10 @@ export async function middleware(req: NextRequest) {
   if (pathname.startsWith('/api/'))
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const loginUrl = new URL('/login', req.url)
-  const target = req.nextUrl.pathname + req.nextUrl.search
-  if (target !== '/') loginUrl.searchParams.set('next', target)
   // 303 on writes so an expired session doesn't replay a POST at the login page.
-  return NextResponse.redirect(
-    loginUrl,
+  return redirectToPath(
+    req,
+    loginPath({ next: req.nextUrl.pathname + req.nextUrl.search }),
     req.method === 'GET' || req.method === 'HEAD' ? 307 : 303,
   )
 }

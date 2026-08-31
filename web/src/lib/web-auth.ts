@@ -10,6 +10,7 @@
  * Everything here has to run inside middleware (edge runtime), so it uses Web
  * Crypto and no node builtins.
  */
+import { NextResponse } from 'next/server'
 
 export const SESSION_COOKIE_NAME = 'gastito_session'
 
@@ -201,6 +202,59 @@ export function safeNextPath(value: string | null | undefined): string {
     return '/'
   if (value.startsWith('/login')) return '/'
   return value
+}
+
+/**
+ * The login URL to bounce to, carrying the page the visitor was after and, when
+ * a submitted form was rejected, why. `next` is sanitized on the way in, so a
+ * caller cannot widen it into an off-site redirect.
+ */
+export function loginPath({
+  error,
+  next,
+}: { error?: string; next?: string } = {}): string {
+  const params = new URLSearchParams()
+  if (error) params.set('error', error)
+  const target = safeNextPath(next)
+  if (target !== '/') params.set('next', target)
+  const query = params.toString()
+  return query ? `/login?${query}` : '/login'
+}
+
+/**
+ * The origin the browser actually asked for.
+ *
+ * Deliberately *not* `req.url`: Next builds that from the server's own bind
+ * address, and `next start` is given none, so inside middleware and route
+ * handlers it reads `http://localhost:3000` — the container, not the public
+ * hostname Caddy answers on. Redirecting against it sent everyone to localhost
+ * right after logging in.
+ *
+ * `Host` comes first because Caddy routes on it and passes it through
+ * untouched, so it has already been matched against a configured site;
+ * `x-forwarded-host` covers a proxy that rewrites `Host` instead.
+ */
+export function publicOrigin(req: Request): string {
+  const host =
+    req.headers.get('host') ??
+    req.headers.get('x-forwarded-host')?.split(',')[0].trim()
+  if (!host) return new URL(req.url).origin
+  return `${isSecureRequest(req) ? 'https' : 'http'}://${host}`
+}
+
+/**
+ * Redirect to a path on the origin the browser is actually on.
+ *
+ * A relative `Location` would be simpler, but middleware runs in the edge
+ * runtime, where Next parses the header into a `NextURL` and throws on
+ * anything that isn't absolute.
+ */
+export function redirectToPath(
+  req: Request,
+  path: string,
+  status: 303 | 307,
+): NextResponse {
+  return NextResponse.redirect(new URL(path, publicOrigin(req)), status)
 }
 
 /**

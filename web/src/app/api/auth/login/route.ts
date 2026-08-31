@@ -5,11 +5,13 @@ import {
   credentialsMatch,
   getGateCredentials,
   isSecureRequest,
+  loginPath,
   loginThrottle,
+  redirectToPath,
   safeNextPath,
   sessionCookieOptions,
 } from '@/lib/web-auth'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 
 /**
  * gastito: the login form's target (see `app/login/page.tsx`).
@@ -22,19 +24,15 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function POST(req: NextRequest) {
   const creds = getGateCredentials()
   // Gate disabled: nothing to log into.
-  if (!creds) return NextResponse.redirect(new URL('/', req.url), 303)
+  if (!creds) return redirectToPath(req, '/', 303)
 
   const form = await req.formData()
   const user = String(form.get('username') ?? '')
   const pass = String(form.get('password') ?? '')
   const next = safeNextPath(String(form.get('next') ?? ''))
 
-  const back = (error: string) => {
-    const url = new URL('/login', req.url)
-    url.searchParams.set('error', error)
-    if (next !== '/') url.searchParams.set('next', next)
-    return NextResponse.redirect(url, 303)
-  }
+  const back = (error: string) =>
+    redirectToPath(req, loginPath({ error, next }), 303)
 
   const clientKey = clientKeyFromRequest(req)
   if (!loginThrottle.allows(clientKey)) return back('throttled')
@@ -45,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
 
   loginThrottle.reset(clientKey)
-  const res = NextResponse.redirect(new URL(next, req.url), 303)
+  const res = redirectToPath(req, next, 303)
   res.cookies.set(
     SESSION_COOKIE_NAME,
     await createSessionToken(creds),

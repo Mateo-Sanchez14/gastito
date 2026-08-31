@@ -1,9 +1,10 @@
 import {
   SESSION_COOKIE_NAME,
   isSecureRequest,
+  redirectToPath,
   sessionCookieOptions,
 } from '@/lib/web-auth'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 
 /**
  * gastito: drop the session cookie (the header's "log out" button posts here).
@@ -12,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
  * Basic Auth — those are cleared from the browser's own settings.
  */
 export async function POST(req: NextRequest) {
-  const res = NextResponse.redirect(new URL('/login', req.url), 303)
+  const res = redirectToPath(req, '/login', 303)
   res.cookies.set(SESSION_COOKIE_NAME, '', {
     ...sessionCookieOptions(isSecureRequest(req)),
     maxAge: 0,

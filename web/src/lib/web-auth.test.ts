@@ -11,6 +11,9 @@ import {
   createSessionToken,
   credentialsMatch,
   isSecureRequest,
+  loginPath,
+  publicOrigin,
+  redirectToPath,
   safeNextPath,
   shouldRefreshSession,
   verifySessionToken,
@@ -197,5 +200,87 @@ describe('login throttle', () => {
     throttle.recordFailure('1.2.3.4', NOW)
     throttle.reset('1.2.3.4')
     expect(throttle.allows('1.2.3.4', NOW)).toBe(true)
+  })
+})
+
+describe('loginPath', () => {
+  it('is a bare path when there is nothing to carry over', () => {
+    expect(loginPath()).toBe('/login')
+    expect(loginPath({ next: '/' })).toBe('/login')
+  })
+
+  it('carries the target and the error code', () => {
+    expect(loginPath({ next: '/groups/abc/expenses' })).toBe(
+      '/login?next=%2Fgroups%2Fabc%2Fexpenses',
+    )
+    expect(loginPath({ error: 'invalid', next: '/groups' })).toBe(
+      '/login?error=invalid&next=%2Fgroups',
+    )
+  })
+
+  it('drops a `next` that is not a local path', () => {
+    expect(loginPath({ next: '//evil.example' })).toBe('/login')
+    expect(loginPath({ next: 'https://evil.example' })).toBe('/login')
+  })
+})
+
+describe('publicOrigin', () => {
+  const request = (url: string, headers?: Record<string, string>) =>
+    new Request(url, { headers })
+
+  it('uses the host the browser asked for, not the container address', () => {
+    expect(
+      publicOrigin(
+        request('http://localhost:3000/groups', {
+          host: 'gastito.example',
+          'x-forwarded-proto': 'https',
+        }),
+      ),
+    ).toBe('https://gastito.example')
+  })
+
+  it('falls back to x-forwarded-host when the proxy rewrote Host', () => {
+    expect(
+      publicOrigin(
+        request('http://localhost:3000/groups', {
+          'x-forwarded-host': 'gastito.example',
+          'x-forwarded-proto': 'https',
+        }),
+      ),
+    ).toBe('https://gastito.example')
+  })
+
+  it('leaves plain local dev alone', () => {
+    expect(publicOrigin(request('http://localhost:3000/groups'))).toBe(
+      'http://localhost:3000',
+    )
+  })
+})
+
+describe('redirectToPath', () => {
+  const request = (headers?: Record<string, string>) =>
+    new Request('http://localhost:3000/groups', { headers })
+
+  it('redirects to the public origin, never the container address', () => {
+    const res = redirectToPath(
+      request({ host: 'gastito.example', 'x-forwarded-proto': 'https' }),
+      '/groups',
+      303,
+    )
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toBe('https://gastito.example/groups')
+  })
+
+  it('keeps the query string and carries cookies', () => {
+    const res = redirectToPath(
+      request({ host: 'gastito.example', 'x-forwarded-proto': 'https' }),
+      '/login?error=invalid',
+      303,
+    )
+    expect(res.headers.get('location')).toBe(
+      'https://gastito.example/login?error=invalid',
+    )
+    res.cookies.set('gastito_session', 'token', { path: '/' })
+    expect(res.headers.get('set-cookie')).toContain('gastito_session=token')
   })
 })
